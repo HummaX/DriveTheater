@@ -3,7 +3,7 @@
 set -Eeuo pipefail
 umask 077
 REPOSITORY='https://github.com/HummaX/DriveTheater.git'
-VERSION=main
+APP_VERSION=main
 INSTALL_DIR=/opt/drivetheater
 DATA_DIR=/var/lib/drivetheater
 ENV_DIR=/etc/drivetheater
@@ -15,13 +15,21 @@ usage() {
     echo 'Usage: install.sh [--version COMMIT_OR_TAG] [--port 80] [--data-dir /var/lib/drivetheater] [--install-dir /opt/drivetheater] [--public-url https://media.example.com] [--setup-bundle /absolute/private.json]'
     echo 'Fresh Ubuntu 24.04 setup. Existing installations are preserved; use manage.sh update for updates.'
 }
+# os-release defines VERSION (the Ubuntu display name), not an application revision.
+# Read it in a subshell so it cannot overwrite any bootstrap variables.
+check_ubuntu_release() (
+    local release_file=${1:-/etc/os-release}
+    [[ -r "$release_file" ]] || fail 'Cannot identify the operating system'
+    . "$release_file"
+    [[ "${ID:-}" == ubuntu && "${VERSION_ID:-}" == 24.04 ]] || fail 'This installer targets Ubuntu 24.04'
+)
 main() {
 while (( $# )); do
     case "$1" in
         --version|--port|--data-dir|--install-dir|--public-url|--setup-bundle)
             (( $# >= 2 )) || fail "Missing value for $1"
             case "$1" in
-                --version) VERSION=$2;; --port) PORT=$2;; --data-dir) DATA_DIR=$2;;
+                --version) APP_VERSION=$2;; --port) PORT=$2;; --data-dir) DATA_DIR=$2;;
                 --install-dir) INSTALL_DIR=$2;; --public-url) PUBLIC_URL=$2;; --setup-bundle) SETUP_BUNDLE=$2;;
             esac
             shift 2;;
@@ -29,7 +37,7 @@ while (( $# )); do
         *) fail "Unknown argument: $1";;
     esac
 done
-[[ "$VERSION" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ && "$VERSION" != *..* ]] || fail 'Invalid version'
+[[ "$APP_VERSION" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ && "$APP_VERSION" != *..* ]] || fail 'Invalid version'
 [[ "$PORT" =~ ^[0-9]+$ ]] && (( PORT >= 1 && PORT <= 65535 )) || fail 'Port must be 1..65535'
 [[ "$INSTALL_DIR" == /* && "$DATA_DIR" == /* ]] || fail 'Use absolute install and data paths'
 # A piped bootstrap has no reusable source filename. Re-download the same selected
@@ -41,18 +49,16 @@ if (( EUID != 0 )); then
     if [[ -f "${BASH_SOURCE[0]:-}" && ! "${BASH_SOURCE[0]}" == /dev/* ]]; then
         cp -- "${BASH_SOURCE[0]}" "$TEMP_SCRIPT"
     else
-        curl --proto '=https' --tlsv1.2 -fsSL "https://raw.githubusercontent.com/HummaX/DriveTheater/$VERSION/scripts/install.sh" -o "$TEMP_SCRIPT"
+        curl --proto '=https' --tlsv1.2 -fsSL "https://raw.githubusercontent.com/HummaX/DriveTheater/$APP_VERSION/scripts/install.sh" -o "$TEMP_SCRIPT"
     fi
     if [[ -n "$SETUP_BUNDLE" ]]; then
-        sudo bash "$TEMP_SCRIPT" --version "$VERSION" --port "$PORT" --data-dir "$DATA_DIR" --install-dir "$INSTALL_DIR" --public-url "$PUBLIC_URL" --setup-bundle "$SETUP_BUNDLE"
+        sudo bash "$TEMP_SCRIPT" --version "$APP_VERSION" --port "$PORT" --data-dir "$DATA_DIR" --install-dir "$INSTALL_DIR" --public-url "$PUBLIC_URL" --setup-bundle "$SETUP_BUNDLE"
     else
-        sudo bash "$TEMP_SCRIPT" --version "$VERSION" --port "$PORT" --data-dir "$DATA_DIR" --install-dir "$INSTALL_DIR" --public-url "$PUBLIC_URL"
+        sudo bash "$TEMP_SCRIPT" --version "$APP_VERSION" --port "$PORT" --data-dir "$DATA_DIR" --install-dir "$INSTALL_DIR" --public-url "$PUBLIC_URL"
     fi
     exit $?
 fi
-[[ -r /etc/os-release ]] || fail 'Cannot identify the operating system'
-. /etc/os-release
-[[ "${ID:-}" == ubuntu && "${VERSION_ID:-}" == 24.04 ]] || fail 'This installer targets Ubuntu 24.04'
+check_ubuntu_release
 case "$(uname -m)" in x86_64|aarch64|arm64) ;; *) fail 'Supported architectures: x86_64 and arm64';; esac
 command -v flock >/dev/null || fail 'Install util-linux (flock) before continuing'
 exec 9>/var/lock/drivetheater-install.lock
@@ -106,7 +112,7 @@ else
     git clone --single-branch "$REPOSITORY" "$INSTALL_DIR"
 fi
 if (( FRESH )); then
-    git -C "$INSTALL_DIR" -c core.hooksPath=/dev/null fetch --no-tags origin "$VERSION"
+    git -C "$INSTALL_DIR" -c core.hooksPath=/dev/null fetch --no-tags origin "$APP_VERSION"
     [[ -z "$(git -C "$INSTALL_DIR" status --porcelain --untracked-files=all)" ]] || fail 'Checkout changed; no checkout attempted'
     git -C "$INSTALL_DIR" -c core.hooksPath=/dev/null checkout --detach --no-overwrite-ignore FETCH_HEAD
 fi
@@ -140,6 +146,7 @@ COMPOSE=(docker compose --project-directory "$INSTALL_DIR" --env-file "$ENV_FILE
 echo '3. Building and starting DriveTheater...'
 "${COMPOSE[@]}" up -d --build
 echo '4. Waiting for DriveTheater readiness...'
+ready=0
 for _ in {1..60}; do
     if curl --noproxy '*' -fsS --connect-timeout 2 --max-time 4 "http://127.0.0.1:$PORT/api/ready" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("status")=="ok" else 1)' >/dev/null 2>&1; then ready=1; break; fi
     sleep 2

@@ -160,6 +160,98 @@ class ShellInterfaceTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertNotIn('Installing missing', result.stdout)
 
+    def installer_definitions(self):
+        source = (ROOT / 'scripts' / 'install.sh').read_text(encoding='utf-8')
+        definitions, marker, trailing = source.rpartition('\nmain "$@"')
+        self.assertTrue(marker, 'Installer entry point must be identified before fixture execution')
+        self.assertFalse(trailing.strip(), 'Unexpected commands after installer entry point')
+        self.assertNotRegex(definitions, r'(?m)^[ \t]*main(?:[ \t;]|$)', 'Unexpected earlier installer invocation')
+        return source, definitions
+
+    def run_shell_fixture(self, program, *args):
+        # Load definitions only, never main(): no root, apt, Docker, Git or host edits.
+        _, definitions = self.installer_definitions()
+        return subprocess.run(
+            ['bash', '-s', '--', *args], input=definitions + '\n' + program,
+            capture_output=True, text=True, timeout=10,
+        )
+
+    def test_ubuntu_point_release_preserves_requested_git_revision(self):
+        source, _ = self.installer_definitions()
+        start = source.index('if (( FRESH )); then\n    git -C')
+        checkout = source[start:source.index('\nfi', start) + len('\nfi')]
+        parse_start = source.index('while (( $# )); do')
+        arguments = source[parse_start:source.index('# A piped bootstrap', parse_start)]
+        with tempfile.TemporaryDirectory(prefix='drivetheater-os-release-') as directory:
+            release = Path(directory) / 'os-release'
+            release.write_text(
+                'PRETTY_NAME="Ubuntu 24.04.4 LTS"\n'
+                'NAME="Ubuntu"\n'
+                'VERSION_ID="24.04"\n'
+                'VERSION="24.04.4 LTS (Noble Numbat)"\n'
+                'ID=ubuntu\nID_LIKE=debian\n', encoding='utf-8',
+            )
+            for revision in (None, '42d2f9f9e1fcc7397957ce7d9482f0ce3e191742', 'main', 'claude-code', 'v1.2.3'):
+                with self.subTest(revision=revision):
+                    program = '''
+release_file=$1
+shift
+''' + arguments + '''
+VERSION=caller-version
+ID=caller-id
+VERSION_ID=caller-release
+check_ubuntu_release "$release_file"
+printf 'state:%s:%s:%s:%s:%s\\n' "$APP_VERSION" "$VERSION" "$ID" "$VERSION_ID" "$PORT"
+git() {
+    case " $* " in *' status --porcelain '*) return 0;; esac
+    printf 'git-arg:%s\\n' "$@"
+}
+FRESH=1
+INSTALL_DIR=/synthetic/checkout
+''' + checkout
+                    expected = 'main' if revision is None else revision
+                    args = ['--port', '8080']
+                    if revision is not None:
+                        args += ['--version', revision]
+                    result = self.run_shell_fixture(program, release.as_posix(), *args)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn(f'state:{expected}:caller-version:caller-id:caller-release:8080', result.stdout)
+                    self.assertIn(f'git-arg:{expected}\n', result.stdout)
+                    self.assertNotIn('Noble Numbat', result.stdout)
+                    self.assertIn('git-arg:FETCH_HEAD', result.stdout)
+
+    def test_os_check_rejects_other_distributions_and_missing_release(self):
+        with tempfile.TemporaryDirectory(prefix='drivetheater-os-check-') as directory:
+            release = Path(directory) / 'os-release'
+            for contents in ('ID=ubuntu\nVERSION_ID=22.04\n', 'ID=debian\nVERSION_ID=24.04\n', ''):
+                with self.subTest(contents=contents):
+                    release.write_text(contents, encoding='utf-8')
+                    result = self.run_shell_fixture('check_ubuntu_release "$1"', release.as_posix())
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn('This installer targets Ubuntu 24.04', result.stderr)
+            missing = self.run_shell_fixture('check_ubuntu_release "$1"', (Path(directory) / 'missing').as_posix())
+            self.assertNotEqual(missing.returncode, 0)
+            self.assertIn('Cannot identify the operating system', missing.stderr)
+
+    def test_readiness_timeout_reports_recovery_instead_of_unbound_variable(self):
+        source, _ = self.installer_definitions()
+        start = source.index("echo '4. Waiting for DriveTheater readiness...'")
+        readiness = source[start:source.index('\nADDRESS=', start)]
+        program = '''
+ENV_FILE=/synthetic/private/install.env
+DATA_DIR=/synthetic/data
+INSTALL_DIR=/synthetic/checkout
+PORT=8080
+curl() { return 1; }
+python3() { return 1; }
+sleep() { :; }
+''' + readiness
+        result = self.run_shell_fixture(program)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Readiness failed. Preserve /synthetic/private/install.env and /synthetic/data', result.stderr)
+        self.assertIn('manage.sh logs', result.stderr)
+        self.assertNotIn('unbound variable', result.stderr)
+
     def test_shell_syntax(self):
         for name in ('install.sh', 'manage.sh', 'update.sh'):
             result = subprocess.run(['bash', '-n', str(ROOT / 'scripts' / name)], capture_output=True, text=True)

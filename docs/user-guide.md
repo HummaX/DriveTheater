@@ -17,7 +17,7 @@ Change the password in Settings. This command does not reset a later password ch
 1. Connect a folder in **Sources**, then **Sync** it. All indexed videos appear as metadata; sync, search and hover do not download source videos.
 2. Movies and series share one grid. A card with a **Series** badge opens its seasons and episodes. Opening/closing the series is navigation only.
 3. Choose **Play** on one title/episode to start or reuse its download/preparation job and open the player. Play bypasses a scheduled download window.
-4. The download-arrow action **saves to the server** for later viewing. It follows ingest scheduling and bandwidth limits.
+4. The download-arrow action **saves to the server** for later viewing. Queued saves wait for the configured download window before starting; an ongoing transfer does not stop when that window closes. The Mbps limit currently applies to the built-in HTTP downloader, not every external provider/torrent tool.
 5. **Download to device** appears when the complete original file exists in the server cache. It downloads an attachment to your PC/phone, supports byte-range resume, and does not start a second source download. Browser/download-manager capabilities and network capacity determine speed.
 6. **Preview** uses an already generated cached clip. **Remove cached media** keeps the source file and library record.
 7. Search, status filters and Continue watching operate on catalog metadata. Filename patterns such as `Show S01E02` and `Show 1x02` drive series grouping; this is not universal episode recognition.

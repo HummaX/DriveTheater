@@ -1,0 +1,47 @@
+name: drivetheater
+x-runtime: &runtime
+  image: drivetheater:local
+  build: .
+  init: true
+  restart: unless-stopped
+  user: "${DT_UID:-10001}:${DT_GID:-10001}"
+  volumes:
+    - "${DT_HOST_DATA_DIR:?Run the installer to create configuration}:/data"
+  environment: &environment
+    DT_DATA_DIR: /data
+    DT_CACHE_LIMIT_GB: "${DT_CACHE_LIMIT_GB:-20}"
+    DT_UI_DIR: /app/ui
+    DT_ADMIN_USER: "${DT_ADMIN_USER:-admin}"
+    DT_ADMIN_PASSWORD: "${DT_ADMIN_PASSWORD:?Initial login password is required}"
+    DT_SECRET: "${DT_SECRET:?Application secret is required}"
+    DT_PUBLIC_URL: "${DT_PUBLIC_URL:-}"
+    DT_COOKIE_SECURE: "${DT_COOKIE_SECURE:-false}"
+    DT_MEDIA_CPUS: "${DT_MEDIA_CPUS:-0.9}"
+    DT_AUTO_CAPTIONS: "${DT_AUTO_CAPTIONS:-true}"
+    DT_CAPTION_MODEL: "${DT_CAPTION_MODEL:-small}"
+    HF_HOME: /data/models
+    XDG_CACHE_HOME: /data/tool-cache
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+services:
+  web:
+    <<: *runtime
+    ports:
+      - "${DT_BIND:-0.0.0.0}:${DT_PORT:-80}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+  worker:
+    <<: *runtime
+    cpus: "${DT_MEDIA_CPUS:-0.9}"
+    command: ["python", "-m", "drivetheater.worker"]

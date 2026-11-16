@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">DriveTheater</title>
+  <desc id="desc">A cinema screen with a play symbol</desc>
+  <rect width="512" height="512" rx="112" fill="#0d1b2a"/>
+  <rect x="77" y="117" width="358" height="237" rx="32" fill="#173f42" stroke="#91d6e6" stroke-width="19"/>
+  <path d="m216 185 115 50-115 50z" fill="#b8a3f5"/>
+  <path d="M139 403h234" stroke="#91d6e6" stroke-width="21" stroke-linecap="round"/>
+</svg>

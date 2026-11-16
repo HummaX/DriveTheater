@@ -10,7 +10,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from .auth import session_user
+from .access import require_principal
 from .sources import validate_url
 
 router = APIRouter()
@@ -120,7 +120,7 @@ def episode_metadata(body: dict, media_id: str) -> dict:
             or not episode_id.startswith(media_id + ':')
             or type(season) is not int
             or type(episode) is not int
-            or not 1 <= season <= 10000
+            or not 0 <= season <= 9999
             or not 1 <= episode <= 10000
             or episode_id != f'{media_id}:{season}:{episode}'
         ):
@@ -149,8 +149,7 @@ def episode_metadata(body: dict, media_id: str) -> dict:
 
 @router.post('/api/torrentio/streams')
 def streams(payload: Lookup, request: Request):
-    if not session_user(request.app.state.db, request.cookies.get('dt_session')):
-        raise HTTPException(401, 'authentication required')
+    require_principal(request)
     try:
         manifest = payload.manifest_url or saved_addons(request).get('torrentio_manifest_url')
         if not manifest:
@@ -167,10 +166,9 @@ def streams(payload: Lookup, request: Request):
 @router.post('/api/torrentio/episodes')
 def episodes(payload: EpisodeLookup, request: Request):
     """Return series metadata only after an authenticated user explicitly requests it."""
-    if not session_user(request.app.state.db, request.cookies.get('dt_session')):
-        raise HTTPException(401, 'authentication required')
+    require_principal(request)
     try:
-        manifest_url = payload.metadata_manifest_url or _DEFAULT_METADATA_MANIFEST
+        manifest_url = payload.metadata_manifest_url or saved_addons(request).get('metadata_manifest_url') or _DEFAULT_METADATA_MANIFEST
         return episode_metadata(bounded_json_fetch(metadata_endpoint(manifest_url, payload.media_id), request), payload.media_id)
     except (httpx.HTTPError, json.JSONDecodeError, ValueError, TypeError):
         raise HTTPException(400, 'Episode lookup failed. Check the metadata manifest URL, media ID and provider availability.') from None
@@ -182,6 +180,7 @@ class DiscoveryConfig(BaseModel):
 
 
 class CatalogLookup(BaseModel):
+    media_type: Literal['movie', 'series'] = 'movie'
     query: str = Field(default='', max_length=120)
     skip: int = Field(default=0, ge=0, le=10000)
 
@@ -192,8 +191,7 @@ def saved_addons(request: Request) -> dict:
 
 
 def require_user(request: Request):
-    if not session_user(request.app.state.db, request.cookies.get('dt_session')):
-        raise HTTPException(401, 'authentication required')
+    require_principal(request)
 
 
 @router.get('/api/discover/config')
@@ -223,7 +221,7 @@ def save_discovery_config(payload: DiscoveryConfig, request: Request):
     return discovery_config(request)
 
 
-def catalog_movies(body: dict) -> list:
+def catalog_movies(body: dict, media_type: str = 'movie') -> list:
     metas = body.get('metas')
     if not isinstance(metas, list):
         raise ValueError('Invalid catalog')
@@ -234,7 +232,7 @@ def catalog_movies(body: dict) -> list:
         movie_id = meta.get('id')
         if not isinstance(movie_id, str) or not _MEDIA_ID_RE.fullmatch(movie_id) or movie_id in seen:
             continue
-        if meta.get('type', 'movie') != 'movie':
+        if meta.get('type', media_type) != media_type:
             continue
         seen.add(movie_id)
         poster = meta.get('poster')
@@ -262,7 +260,7 @@ def discover_catalog(payload: CatalogLookup, request: Request):
         extra.append('skip=' + str(payload.skip))
     suffix = ('/' + '&'.join(extra)) if extra else ''
     try:
-        endpoint = _manifest_endpoint(manifest, '/catalog/movie/top' + suffix + '.json')
-        return {'items': catalog_movies(bounded_json_fetch(endpoint, request)), 'skip': payload.skip}
+        endpoint = _manifest_endpoint(manifest, '/catalog/' + payload.media_type + '/top' + suffix + '.json')
+        return {'items': catalog_movies(bounded_json_fetch(endpoint, request), payload.media_type), 'skip': payload.skip}
     except (httpx.HTTPError, json.JSONDecodeError, ValueError, TypeError):
         raise HTTPException(400, 'Movie catalog could not be loaded. Check the metadata add-on and try again.') from None

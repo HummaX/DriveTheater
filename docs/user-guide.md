@@ -24,15 +24,36 @@ Change the password in Settings. This command does not reset a later password ch
 
 There are no profiles or pins. Icon-only and selected advanced actions have helpful tooltips after a 500 ms hover/keyboard-focus delay. Ordinary navigation and labeled buttons do not display constant tooltips.
 
-## Discover: a separate movie catalog
+## Discover: a separate movie and series catalog
 
-Open **Discover**, then **Browse movies** or search a title. The configured metadata add-on (Cinemeta by default) receives the query only when you load/search the catalog. IMDb IDs identify movies; this is not an IMDb service.
+Open **Discover**, choose **Movies** or **Series**, then load the catalog or search a title. The configured metadata add-on (Cinemeta by default) receives that explicit catalog/search request. IMDb IDs identify entries; this is not an IMDb service.
 
 Set your authorized Torrentio/Stremio-compatible **stream manifest URL** under **Add-on connection**. Its private path may contain tokens. The server stores it privately and returns only connection status. A compatible metadata manifest can also be configured.
 
-Click a movie to look up compatible streams. This does not start a torrent. Choose the actual source using **Download to server** or **Play**. Keeping the source choice explicit prevents accidentally selecting an unwanted file. The server does not seed after completion. Add-on availability is external and live integration is not verified by mock tests.
+Open a movie to look up compatible streams. For a series, first choose the season and episode, then request its streams. Neither action starts a torrent. Choose the exact source using **Download to server** or **Play**. Keeping the source choice explicit prevents accidentally selecting an unwanted file. Add-on availability is external and live integration is not verified by mock tests.
 
 The Sources page also retains advanced series episode lookup. Adding a lookup result to the library is metadata-only until Play/Download.
+
+## Organize the library
+
+Use Library tools for collections, saved filters, sorting, and views such as Unwatched, Cached, Recently added, Recently watched, Failed jobs, and Continue watching. Collections and personal preferences belong to the signed-in account. Removing an item from a collection does not remove the video or its cached files.
+
+Search is local unless you explicitly search Discover. It can match title, year, genre, cast, director, series/episode information, descriptions, and indexed English captions. Caption search only uses existing local caption files: it does not download a video or run a transcription model. Recent and saved searches are account-scoped. Unknown metadata cannot match a field that has not been filled in.
+
+Open a title's details to correct its title, type, series, season, episode, or other supported fields. Local corrections take priority over fetched metadata, which takes priority over filename/source information. Resetting a correction reveals the fetched/source value again; a metadata refresh does not erase your correction.
+
+For richer information, explicitly preview metadata using the title's movie/series ID, review it, then save it. Cast, director, genre, runtime, rating, related local titles and episode inventory depend on what the provider actually returns. There is no background metadata lookup on every card. A trailer link opens the authorized external site only when you follow it; it never autoplays inside DriveTheater.
+
+Custom poster uploads accept a bounded, validated **PNG** only. SVG, JPEG, WebP, animated and malformed PNG files are refused. Artwork is private, stored separately from disposable cache, and included in new private backups. Provider-hosted posters/trailers may contact their external host when viewed.
+
+### Watched state and series
+
+- Mark watched/unwatched explicitly in title details when you want a manual choice. History cleanup does not erase this durable state.
+- Automatic completion defaults to 90% and requires observed forward playback. Seeking to the end, paused heartbeats, replaying a short section, or supplying a shorter duration is not enough. A manual choice takes precedence over automatic completion.
+- Filename inference recognizes common `S01E02` and `1x02` patterns, including season **00** specials. Correct ambiguous names locally.
+- Season progress uses known episodes. An episode is marked missing only against a known released inventory; future and unknown availability are different states. DriveTheater does not infer that an entire show's external catalog is locally available.
+- Next-episode offers stop at the immediate next episode. They do not jump over an uncached episode. Autoplay is **off by default**; even when enabled, it can only open an already cached/playable next episode. It never queues or downloads one.
+- A season save requires you to select existing sources, preview the count/known sizes/omissions, then explicitly confirm. Unknown size is not zero size. Plans expire and are single-use; changed or active items are rechecked. No arbitrary stream is selected for a missing episode.
 
 ## Original video and player controls
 
@@ -55,11 +76,47 @@ Downloads shows the current phase. A known byte/media/item total gets a percenta
 
 Server displays runtime CPU/RAM, disk/DB/WAL, network, worker/downloader status, alerts and retained local activity. Read the scope note: container-visible values may not equal the entire host. **Clear history** affects your own local activity/watch records, not cached files or another user's history.
 
+## Notifications and source health
+
+The **Notifications** inbox records actual job, source, security, disk/worker and backup events. Read/dismiss actions affect only your inbox, not an underlying failure or the separate security audit. Repeated observations of the same unhealthy condition do not generate a new alert every few seconds; recovery is recorded separately.
+
+Telegram, Discord and email are optional. No channel sends until you deliberately configure and enable it with current password/MFA proof. Enabling a channel does not resend the entire historical inbox. A test is an explicit queued message and needs a running worker. Configuration secrets are not displayed back to the browser. External delivery has bounded retries; an ambiguous remote failure can cause a duplicate, so it is not an exactly-once service.
+
+In **Sources**, use **Test**, **Sync**, or **Reconnect** deliberately. Health shows the last check, last successful test/sync, a safe error category, and any advisory retry time. A successful connection test is not a successful folder sync. A retry hint does not automatically retry or download anything.
+
+## Storage and integrity
+
+Open storage review in Settings, or storage details for one title. Original files, playback derivatives, previews and captions are measured separately. Physical storage/reclaim estimates account for hardlinked/shared content; deleting one library reference may free no bytes.
+
+For bulk cleanup, **preview first**, review the selected titles and estimated reclaim, then confirm. A preview does not delete anything. The confirmation belongs to your account, expires, is single-use, and rejects changed paths/files or active jobs/transfers. If a plan is stale, create a new preview rather than retry the old confirmation. Source files in Drive/other providers are not deleted. Local captions and their search index disappear when their cache is removed; library metadata and private artwork remain.
+
+Retention policies are disabled by default. Only enable a source/title policy if you want automatic expiry; title policies override source policies. Keep-days and delete-after-watch can make inactive cache eligible for removal, but active work/leases remain protected. A watched flag does not prove that you have a backup of the original source.
+
+Integrity verification is an explicit operation. **Locally computed** means a local hash was recorded. A subsequent local match detects changes against that baseline, not against the provider. **Provider verified** requires an available trusted provider checksum; most sources do not supply one. A checksum is not proof of playback compatibility.
+
+Title diagnostics show stored probe facts and best-effort browser codec declarations. Opening diagnostics never starts a probe/download. Job stages show only observed timings, so older jobs may have no stage history. Server counts describe the visible runtime namespace; host/container restart counts are unavailable unless separately measured. The support export uses allowlisted aggregate fields, not raw logs, signed URLs, filenames, passwords or a database dump.
+
+## Optional security, HTTPS and backups
+
+See the [security guide](security.md) before enabling MFA or network restrictions. MFA, trusted proxy identity, IP restrictions, external notifications and autoplay are opt-in. Keep your recovery codes privately outside the server and test a second session before closing your current one.
+
+For a public domain, use the [optional HTTPS guide](https.md). Its helper only checks/renders/writes a configuration: it does not install/start Caddy, request a certificate, change DNS/firewalls, or make the site private. An SSH tunnel remains valid for private administration.
+
+A normal private backup is **not encrypted**. Use [encrypted backup and offline verification](encrypted-backups.md) with an independent passphrase before transporting it. Verification never restores data and is not a disaster-recovery rehearsal.
+
 ## Settings and replacement servers
 
 Set cache/free-space limits, automatic cleanup, download concurrency, media preparation slots, an optional daily download window, ingest bandwidth and history retention. Active playback and active original-file transfers are protected from eligible cache cleanup. Hardware acceleration is excluded.
 
 A private monthly setup bundle preserves Drive/add-on connections and settings, not media, users, sessions or history. It contains secrets: keep it outside Git and transfer it securely. The next server generates fresh admin credentials. See [operations](operations.md) and [installation/recovery](installation.md).
+
+## Install on a phone or desktop
+
+Use the browser's **Install app / Add to Home Screen** option when it is offered, or the installation panel in Settings. Availability depends on the browser and a secure HTTPS/localhost context; it is not guaranteed on every device.
+
+The service worker allowlists only hashed public build assets. It does not cache authenticated APIs, library/account responses, media, captions, range requests, admin routes, query-bearing URLs, or private/no-store responses. Logout requests public-shell cache cleanup. A shell update waits for an explicit reload action; avoid reloading during active playback.
+
+There is no service-worker navigation fallback, so a fresh offline launch is not guaranteed even after public assets have been prepared. Server sign-in, library state and streaming need a connection. For an offline video, deliberately use **Download to device** and a suitable local player; the installed app never fills an offline media cache in the background. Device downloads are separate files under your control and are not removed by signing out.
 
 ## Troubleshooting
 

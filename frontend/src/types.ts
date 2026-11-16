@@ -11,6 +11,8 @@ export interface Video {
   playback: Playback; last_played: string | null; watch_position?: number | null;
   caption_status?: 'pending' | 'extracting' | 'generating' | 'ready' | 'unavailable' | 'failed'; caption_error?: string | null;
   updated_at: string; download_url?: string | null;
+  watched?: boolean; type?: 'movie' | 'series'; year?: number; series?: string; season?: number; episode?: number;
+  metadata?: Record<string, unknown>; overrides?: Record<string, unknown>;
 }
 export interface Job {
   id: string; video_id: string; title: string; state: string; phase: string; progress: number;
@@ -21,6 +23,7 @@ export interface Source {
   id: string; name: string; kind: 'google_drive'; auth_mode: 'public_link' | 'api_key' | 'service_account' | 'oauth'; folder_id: string;
   status: string; video_count: number; last_sync: string | null; error: string | null; has_credentials: boolean; service_account_email: string | null; oauth_redirect_url: string | null;
   sync_progress?: { phase: string; processed: number; total: number | null } | null;
+  health?: { state: 'unknown' | 'healthy' | 'error'; last_test_success_at: number | null; last_sync_success_at: number | null; error_code: string | null; message: string | null; retry_at: number | null; retryable: boolean };
 }
 export interface Settings { cache_limit_gb: number; min_free_gb: number; download_concurrency: number; max_transcodes: number; cache_used_bytes: number; disk_free_bytes: number; data_dir: string; ffmpeg_available: boolean; worker_online: boolean; download_schedule_enabled?: boolean; download_start_hour?: number; download_end_hour?: number; download_limit_mbps?: number; auto_cache_cleanup?: boolean; cache_cleanup_target_percent?: number; activity_retention_days?: number }
 export interface SpriteCue { start: number; end: number; image: string; x: number; y: number; width?: number; height?: number }

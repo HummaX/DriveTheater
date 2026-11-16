@@ -63,6 +63,7 @@ class Database:
         with self.connect() as db:
             db.executescript(
                 """
+                BEGIN IMMEDIATE;
                 CREATE TABLE IF NOT EXISTS users (
                   username TEXT PRIMARY KEY, password_hash TEXT NOT NULL, created_at TEXT NOT NULL
                 );
@@ -149,6 +150,8 @@ class Database:
             }
             for key, value in defaults.items():
                 db.execute("INSERT OR IGNORE INTO settings(key,value) VALUES (?,?)", (key, value))
+            from .feature_schema import migrate
+            migrate(db)
 
     @contextlib.contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:

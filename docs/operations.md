@@ -66,7 +66,7 @@ They solve different problems:
 
 | Option | Use it for | Includes | Does not include |
 |---|---|---|---|
-| **Backup** | Keeping database/configuration for a carefully planned recovery. | Database, private provider configuration, original installer settings, and a checksum manifest. | Cached videos and generated media assets. |
+| **Backup** | Keeping database/configuration for a carefully planned recovery. | Database (including accounts/MFA/session state), private provider configuration, custom artwork, original installer settings, and a checksum manifest. | Cached videos and generated media assets. |
 | **Private setup bundle** | Moving connections/settings to a fresh monthly server without carrying over user data. | Drive connections, private provider/add-on configuration, and supported app settings. | Library/video records, cached videos, user accounts, sessions, watch history, and the old app administrator login. |
 
 **Both can contain secrets.** Keep them off GitHub and away from public web folders. A file saved only on your server is lost if that server or its disk is lost; keep a secure copy elsewhere.
@@ -84,6 +84,30 @@ The command prints the created backup directory under `/var/lib/drivetheater/bac
 The database copy uses SQLite's backup API and checks its integrity. Cached media is not backed up. If you need an aligned snapshot of both the database and changing provider credential files, pause changes and plan a maintenance stop before creating it.
 
 **Restoring is not automatic.** A recovery must match the app version and database format, with no app processes writing to the database. Do not overwrite a live database or delete a failed installation just because a backup exists. A successful backup check is not proof that a disaster restore has been rehearsed.
+
+## Encrypt and verify a backup
+
+The normal `backup` directory is private **plaintext**, not an encrypted archive. It now includes validated custom poster artwork; disposable cached video/previews/captions are still excluded. The database snapshot is materialized as a standalone SQLite file, so it must not need live WAL/SHM sidecars.
+
+Use this only on a reviewed version containing the optional helper, with its reviewed host `cryptography` dependency already available. These example paths are templates: replace `SNAPSHOT` with the directory printed by `backup`, and choose a new archive filename in an existing private directory outside that snapshot.
+
+```bash
+sudo bash /opt/drivetheater/scripts/manage.sh encrypt-backup /var/lib/drivetheater/backups/SNAPSHOT /private/offline/SNAPSHOT.dtb
+```
+
+Enter an independent strong backup passphrase at the hidden prompt. Do not put it in the command, environment, setup bundle, or shell history. Store it separately from the archive.
+
+```bash
+sudo bash /opt/drivetheater/scripts/manage.sh verify-backup /private/offline/SNAPSHOT.dtb
+```
+
+Verification authenticates the encrypted archive, checks its bounded/allowlisted members and hashes, and checks SQLite integrity in private temporary storage. It **does not restore**, prove provider credentials still work, or certify a disaster recovery. It never deletes the original plaintext backup. Keep that original private and retain it until your own verified retention process permits removal. See [encrypted backup details and limits](encrypted-backups.md).
+
+## Security and HTTPS maintenance
+
+[Optional MFA, session controls and network-policy recovery](security.md) use their own deliberate confirmation steps. If an IP/proxy policy locks you out, use the root-only network recovery helper over SSH; it preserves password, MFA, sessions, and media. Do not reset the entire installation.
+
+[HTTPS preflight/configuration](https.md) is optional. The helper never installs/reloads a proxy, requests ACME certificates, takes over ports, or changes DNS/firewalls. Apply only through your own reviewed server change process.
 
 ## Update an existing installation
 

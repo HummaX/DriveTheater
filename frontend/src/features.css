@@ -1,0 +1,46 @@
+/* Feature controls extend the existing projection-room palette without new chrome. */
+.library-tools-shell, .security-section, .pwa-install, .next-episode { margin-block: 24px; }
+.library-tools-shell > summary, .season-selection > summary { cursor: pointer; padding: 12px 0; font-weight: 600; }
+.library-tools, .library-inspector, .notification-settings, .storage-tools { display: grid; gap: 18px; min-width: 0; }
+.library-tools form, .library-filter, .action-row { display: flex; align-items: end; flex-wrap: wrap; gap: 10px; }
+.library-filter input { flex: 1; min-width: 160px; }
+.library-tools [aria-label="Smart filters"] { display: flex; flex-wrap: wrap; gap: 8px; }
+.library-tools fieldset { display: flex; align-items: center; flex-wrap: wrap; gap: 18px; }
+.library-tools fieldset input[type="number"] { width: 78px; }
+.library-tools input[type="checkbox"], .episode-selection input[type="checkbox"] { width: 20px; height: 20px; flex-shrink: 0; }
+.library-inspector { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.library-inspector details, .library-inspector > p { grid-column: 1 / -1; }
+.library-details-dialog { width: min(820px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 12px; padding: 24px; }
+.library-details-dialog::backdrop { background: #020712c9; }
+.library-details-dialog > section { margin-top: 22px; }
+.library-details-dialog .section-heading { align-items: start; }
+.library-details-dialog h2 { overflow-wrap: anywhere; }
+.library-details-dialog pre, .secret-reveal pre, .break-secret { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 100%; }
+.secret-reveal { border: 1px solid var(--line); padding: 16px; margin-block: 14px; background: var(--canvas); }
+.secret-reveal code { display: block; overflow-wrap: anywhere; user-select: all; }
+.plain-list { list-style: none; padding: 0; margin: 12px 0; }
+.plain-list > li { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; padding-block: 12px; border-bottom: 1px solid var(--line); }
+.plain-list > li .muted { flex-basis: 100%; }
+.episode-selection { display: grid; gap: 10px; margin-block: 12px; max-height: 280px; overflow: auto; }
+.season-download { display: flex; gap: 12px; flex-wrap: wrap; padding-block: 12px; }
+.season-download > span { flex-basis: 100%; overflow-wrap: anywhere; }
+.notification-inbox, .notification-channels { min-width: 0; }
+.notification-inbox li { overflow-wrap: anywhere; }
+.security-section p, .pwa-install p, .next-episode p { max-width: 75ch; }
+.storage-tools table { border-collapse: collapse; width: 100%; }
+.storage-tools th, .storage-tools td { padding: 10px; text-align: left; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.storage-tools .table-scroll { overflow-x: auto; }
+@media (max-width: 640px) {
+  .main-panel { padding-bottom: max(24px, env(safe-area-inset-bottom)); }
+  .control-deck { padding-bottom: max(18px, env(safe-area-inset-bottom)); }
+  .controls .icon-button, .controls select, .subtitle-offset .button, .next-episode .button { min-height: 44px; min-width: 44px; }
+  .library-inspector { grid-template-columns: 1fr; }
+  .library-details-dialog { padding: 16px; }
+  .security-section .settings-grid { grid-template-columns: 1fr; }
+  .action-row > .button, .season-download > .button { min-height: 44px; }
+  .library-filter { align-items: stretch; }
+  .library-filter input, .library-filter select { width: 100%; flex-basis: 100%; }
+}
+@media (forced-colors: active) {
+  .library-details-dialog, .secret-reveal, .pwa-install, .next-episode { background: Canvas; color: CanvasText; border-color: CanvasText; }
+}

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Installer state and consistent backups. Never execute dotenv as shell code."""
 import argparse
+from contextlib import closing
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -418,12 +419,22 @@ def backup(envfile, revision='unknown'):
     if db.exists():
         if db.is_symlink():
             raise ValueError('Database path must not be a symlink')
-        with sqlite3.connect(db.as_uri() + '?mode=ro', uri=True) as source:
-            with sqlite3.connect(destination / 'drivetheater.sqlite3') as target:
+        snapshot = destination / 'drivetheater.sqlite3'
+        with closing(sqlite3.connect(db.as_uri() + '?mode=ro', uri=True)) as source:
+            with closing(sqlite3.connect(snapshot)) as target:
                 source.backup(target)
+                # A source using WAL can copy that mode into the destination. Materialize
+                # a closed standalone database before hashing; never archive live sidecars.
+                target.commit()
+                target.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+                mode = target.execute('PRAGMA journal_mode=DELETE').fetchone()[0]
+                if str(mode).lower() != 'delete':
+                    raise ValueError('Database snapshot could not be materialized')
                 if target.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
                     raise ValueError('Database backup integrity check failed')
-        os.chmod(destination / 'drivetheater.sqlite3', 0o600)
+        if any(destination.glob('drivetheater.sqlite3-*')):
+            raise ValueError('Database snapshot contains unexpected sidecars')
+        os.chmod(snapshot, 0o600)
     configs = data / 'config'
     if configs.is_dir() and not configs.is_symlink():
         with tarfile.open(destination / 'config.tar.gz', 'w:gz', dereference=False) as archive:
@@ -431,9 +442,23 @@ def backup(envfile, revision='unknown'):
                 if entry.is_symlink() or not entry.is_file():
                     continue
                 archive.add(entry, arcname=str(entry.relative_to(data)), recursive=False)
+            artwork = data / 'artwork'
+            if artwork.exists() or artwork.is_symlink():
+                if not artwork.is_dir() or artwork.is_symlink():
+                    raise ValueError('Artwork storage must be a plain directory')
+                for entry in artwork.iterdir():
+                    info = entry.lstat()
+                    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or not re.fullmatch(r'[a-f0-9]{64}\.png', entry.name):
+                        raise ValueError('Artwork contains an unsafe or incomplete file; retry after uploads finish')
+                    archive.add(entry, arcname='artwork/' + entry.name, recursive=False)
         os.chmod(destination / 'config.tar.gz', 0o600)
     files = {item.name: hashlib.sha256(item.read_bytes()).hexdigest() for item in destination.iterdir() if item.is_file()}
     exclusive(destination / 'manifest.json', json.dumps({'revision': revision, 'files': files, 'media_included': False}, indent=2).encode())
+    if db.exists():
+        with closing(sqlite3.connect(db.as_uri() + '?mode=rw', uri=True, timeout=15)) as live:
+            if live.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='backup_records'").fetchone():
+                with live:
+                    live.execute('INSERT INTO backup_records(id,created_at,encrypted,status,revision) VALUES(?,?,0,?,?)', (destination.name, int(datetime.now(timezone.utc).timestamp()), 'created', str(revision)[:128]))
     return destination
 
 

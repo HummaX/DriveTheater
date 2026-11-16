@@ -105,7 +105,11 @@ class ConfigurationTests(unittest.TestCase):
         (self.data / 'config' / 'private.json').write_text('{"fixture":"not-real"}')
         (self.data / 'cache' / 'movie.mp4').write_bytes(b'not part of backup')
         destination = config.backup(self.env, 'test-revision')
+        self.assertFalse(list(destination.glob('drivetheater.sqlite3-*')))
+        snapshot_manifest = json.loads((destination / 'manifest.json').read_text())
+        self.assertEqual(set(snapshot_manifest['files']), {'install.env', 'drivetheater.sqlite3', 'config.tar.gz'})
         with sqlite3.connect(destination / 'drivetheater.sqlite3') as db:
+            self.assertEqual(db.execute('PRAGMA journal_mode').fetchone()[0], 'delete')
             self.assertEqual(db.execute('SELECT value FROM example').fetchone()[0], 'preserved')
         manifest = json.loads((destination / 'manifest.json').read_text())
         self.assertEqual(manifest['revision'], 'test-revision')

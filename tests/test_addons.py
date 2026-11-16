@@ -29,17 +29,18 @@ class AddonEpisodeTests(unittest.TestCase):
                 {'id': 'tt1234567:1:5', 'season': 1, 'episode': 6},
             ],
         }}
-        with patch.object(addons, 'session_user', return_value=True), patch.object(addons, 'bounded_json_fetch', return_value=body) as fetch:
+        with patch.object(addons, 'require_principal', return_value=SimpleNamespace(username='fixture')), patch.object(addons, 'saved_addons', return_value={}), patch.object(addons, 'bounded_json_fetch', return_value=body) as fetch:
             result = addons.episodes(addons.EpisodeLookup(media_id='tt1234567'), self.request)
         self.assertEqual(fetch.call_args.args[0], 'https://v3-cinemeta.strem.io/meta/series/tt1234567.json')
         self.assertEqual(result, {
             'id': 'tt1234567', 'title': 'Example Show', 'poster': 'https://images.example/poster.jpg',
             'episodes': [{'id': 'tt1234567:1:2', 'title': 'Second episode', 'season': 1, 'episode': 2,
-                          'thumbnail': 'https://images.example/e2.jpg', 'released': '2026-01-01T00:00:00.000Z'}],
+                          'thumbnail': 'https://images.example/e2.jpg', 'released': '2026-01-01T00:00:00.000Z'},
+                         {'id': 'tt1234567:0:3', 'title': 'S00E03', 'season': 0, 'episode': 3, 'thumbnail': None, 'released': None}],
         })
 
     def test_episodes_rejects_metadata_id_mismatch_without_exposing_url(self):
-        with patch.object(addons, 'session_user', return_value=True), patch.object(
+        with patch.object(addons, 'require_principal', return_value=SimpleNamespace(username='fixture')), patch.object(addons, 'saved_addons', return_value={}), patch.object(
             addons, 'bounded_json_fetch', return_value={'meta': {'id': 'tt7654321', 'videos': []}}
         ):
             with self.assertRaises(addons.HTTPException) as caught:

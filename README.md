@@ -7,6 +7,8 @@ Watch videos from your Google Drive and other sources you are allowed to use, th
 > **Preview software:** local tests and synthetic playback checks have passed, but a complete Ubuntu 24.04 installation, Docker startup, and live external services have not yet been verified. Try it on a fresh server before relying on it. DriveTheater is a separate project, not an upgrade for DriveConnector.
 >
 > **Already saw `fatal: invalid refspec '24.04.4 LTS (Noble Numbat)'`?** That is an installer bug, not a broken Ubuntu installation. Read [how to recover from this exact error](docs/installation.md#invalid-refspec-after-cloning). Do not delete your data or edit the server checkout to work around it.
+>
+> **Containers restart with `PermissionError` reading `/app/drivetheater/__init__.py`?** Use the [container-permission recovery guide](docs/container-permission-recovery.md). The fix changes immutable image assets, not your stored media, credentials or database.
 
 ## What you need
 
@@ -107,6 +109,12 @@ The app keeps the **original video quality**: no video resizing, quality menu, o
 
 Audio options prefer English, Hindi, and explicitly labeled original tracks. Captions are English only. Missing tracks are not invented. Automatic captions require a separate model/dependency path that has not been live-verified.
 
+## Optional feature expansion
+
+This preview source includes collections and saved filters, durable watched/series state, explicit season-save confirmations, metadata corrections and private PNG posters, notifications/source health, storage previews/integrity/diagnostics, MFA/session/network controls, encrypted-backup and HTTPS helpers, and a public-assets-only PWA shell.
+
+**The expansion is preview code, not deployment certification.** Current Python/API checks pass, but the changed frontend has not yet been TypeScript/Vite-built or browser-verified. Read the [current verification status](docs/release-review.md) rather than treating the earlier preview's frontend checks as approval of this expansion. [Using the features](docs/user-guide.md).
+
 ## Everyday server commands
 
 Run these **on the Ubuntu server**. You do not need to be in a particular folder.
@@ -158,11 +166,13 @@ Do not delete these folders to fix an error. If setup stops, keep the error outp
 - [Beginner installation and troubleshooting](docs/installation.md)
 - [Using the app](docs/user-guide.md)
 - [Maintenance, backups, updates, and replacement servers](docs/operations.md)
+- [Optional MFA, session controls and network recovery](docs/security.md)
+- [Encrypted offline backups](docs/encrypted-backups.md) and [optional HTTPS](docs/https.md)
 - [Google Drive authorization](docs/google-drive.md)
 - [Architecture](docs/architecture.md) and [UI design](docs/ui-design.md)
 - [Detailed verification and remaining limitations](docs/release-review.md)
 
-Local Python, API, frontend, and synthetic-media checks cover individual behaviors; they are not proof of a successful real Ubuntu deployment. Optional downloader/transcription tools and models have not been live-validated. The frontend build also retains a large-bundle warning. Use only authorized media; no DRM or access-control bypass is provided.
+Local Python/API/synthetic-media checks cover individual behaviors; they are not proof of a real Ubuntu deployment. The earlier preview passed frontend/browser checks, but the current expansion still needs its own build and browser verification. Optional downloader/transcription tools and models have not been live-validated. The earlier Vite build also warned about bundle size. Use only authorized media; no DRM or access-control bypass is provided.
 
 ## License
 

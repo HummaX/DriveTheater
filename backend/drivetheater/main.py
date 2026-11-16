@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hmac
 import asyncio
+import contextlib
+import logging
 import json
 import math
 import os
@@ -22,6 +24,12 @@ from pydantic import BaseModel, Field
 
 from .auth import (ensure_admin, make_session, revoke_session,
                    session_hash, session_user, verify_password, hash_password)
+from .access import enforce_network, require_principal, security_event
+from .security import begin_challenge, issue_session, mfa_enabled, verify_sensitive
+from .jobs import enqueue_video
+from . import library
+from .notifications import notify
+from .source_health import attach_health, record_result
 from .audit import recent_activity, record_event, record_watch, watch_history
 from .config import Config, load_config
 from .db import Database, decode_job, decode_source, decode_video, utcnow
@@ -32,8 +40,14 @@ from .sources import (GoogleAdapter, folder_id, google_remote_metadata, is_video
 from .providers import classify_source, source_identity
 from .subtitle_utils import caption_path, normalize_caption, validated_language
 
-class Login(BaseModel): username: str; password: str
-class PasswordChange(BaseModel): current_password: str; new_password: str = Field(min_length=10)
+class Login(BaseModel):
+    username: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=1, max_length=1024)
+class PasswordChange(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=10, max_length=1024)
+    code: str | None = Field(default=None, max_length=8)
+    recovery_code: str | None = Field(default=None, max_length=64)
 class Activity(BaseModel):
     active: bool
     position: float | None = Field(default=None, ge=0)
@@ -59,8 +73,34 @@ def create_app(config: Config | None = None) -> FastAPI:
     cfg = config or load_config()
     db = Database(cfg.database_path); db.initialize(); ensure_admin(db, cfg.admin_user, cfg.admin_password)
     cfg.credentials_dir.mkdir(parents=True, exist_ok=True); cfg.media_dir.mkdir(parents=True, exist_ok=True)
-    app = FastAPI(title="DriveTheater")
+    async def monitor_conditions():
+        from .feature_maintenance import observe_conditions
+        while True:
+            try:
+                await asyncio.to_thread(observe_conditions, db, cfg.data_dir)
+            except (OSError, ValueError, sqlite3.Error):
+                logging.getLogger(__name__).warning('Scheduled health observation failed; retrying later')
+            await asyncio.sleep(30)
+
+    @contextlib.asynccontextmanager
+    async def lifespan(_app):
+        monitor = asyncio.create_task(monitor_conditions())
+        try:
+            yield
+        finally:
+            monitor.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await monitor
+
+    app = FastAPI(title="DriveTheater", lifespan=lifespan)
     app.state.config, app.state.db, app.state.metrics = cfg, db, ServerMetrics()
+    app.state.notify = lambda username, kind, title, message, key: notify(db, username, kind, title, message, key)
+    from .cache_safety import CacheManager
+    from .storage_features import StorageService
+    from .diagnostics import DiagnosticsService
+    from .storage_routes import create_storage_router
+    cache_manager = CacheManager(db, cfg.data_dir)
+    app.include_router(create_storage_router(StorageService(db, cfg.media_dir, cache_manager), DiagnosticsService(db, cfg.data_dir)))
     login_attempts: dict[tuple[str, str], tuple[int, float]] = {}
     login_attempts_lock = threading.Lock()
     login_window_seconds = 60
@@ -70,6 +110,10 @@ def create_app(config: Config | None = None) -> FastAPI:
     @app.middleware("http")
     async def verify_mutation_origin(request: Request, call_next):
         """Reject cross-origin browser mutations while leaving CLI clients usable."""
+        try:
+            enforce_network(request)
+        except HTTPException as exc:
+            return JSONResponse({'detail': exc.detail}, status_code=exc.status_code)
         if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
             origin = request.headers.get("origin")
             if origin:
@@ -79,7 +123,11 @@ def create_app(config: Config | None = None) -> FastAPI:
                 configured_origin = (cfg.public_url or "").rstrip("/")
                 if received_origin not in {request_origin, configured_origin}:
                     return JSONResponse({"detail": "invalid request origin"}, status_code=403)
-        return await call_next(request)
+        response = await call_next(request)
+        if request.url.path.startswith('/api/'):
+            response.headers['Cache-Control'] = 'private, no-store'
+            response.headers['X-Content-Type-Options'] = 'nosniff'
+        return response
 
     def _login_key(request: Request, username: str) -> tuple[str, str]:
         # A peer address is supplied by the ASGI server; never accept a spoofable forwarded header.
@@ -111,10 +159,8 @@ def create_app(config: Config | None = None) -> FastAPI:
         with login_attempts_lock:
             login_attempts.pop(key, None)
 
-    def authenticated(dt_session: str | None = Cookie(None)) -> str:
-        user = session_user(db, dt_session)
-        if not user: raise HTTPException(401, "authentication required")
-        return user
+    def authenticated(request: Request) -> str:
+        return require_principal(request).username
     def video_or_404(video_id: str):
         with db.connect() as conn: row=conn.execute("SELECT * FROM videos WHERE id=?", (video_id,)).fetchone()
         if not row: raise HTTPException(404, "video not found")
@@ -142,7 +188,9 @@ def create_app(config: Config | None = None) -> FastAPI:
             while not await request.is_disconnected():
                 if time.monotonic() - checked > 15:
                     checked = time.monotonic()
-                    if not session_user(db, dt_session):
+                    try:
+                        require_principal(request)
+                    except HTTPException:
                         yield 'data: {"type":"auth-expired"}\n\n'
                         return
                 yield 'data: {"type":"invalidate"}\n\n'
@@ -166,7 +214,9 @@ def create_app(config: Config | None = None) -> FastAPI:
             record_event(db, "login_failure", username=payload.username)
             raise HTTPException(401, "invalid username or password")
         _clear_login_failures(key)
-        token=make_session(db,payload.username); response.set_cookie("dt_session", token, httponly=True, samesite="lax", secure=cfg.cookie_secure, max_age=604800)
+        if mfa_enabled(db, payload.username):
+            return JSONResponse({'mfa_required': True, 'challenge': begin_challenge(request, payload.username)}, status_code=202, headers={'Cache-Control': 'no-store'})
+        token=issue_session(request, payload.username); response.set_cookie("dt_session", token, httponly=True, samesite="lax", secure=cfg.cookie_secure, max_age=604800)
         record_event(db, "login_success", username=payload.username)
         return {"username":payload.username}
     @app.get("/api/auth/me")
@@ -178,12 +228,14 @@ def create_app(config: Config | None = None) -> FastAPI:
         record_event(db, "logout", username=user)
         return {"ok":True}
     @app.post("/api/auth/password")
-    def password(payload: PasswordChange, response: Response, user: str=Depends(authenticated)):
+    def password(payload: PasswordChange, request: Request, response: Response, user: str=Depends(authenticated)):
+        verify_sensitive(request, user, payload.current_password, payload.code, payload.recovery_code)
         with db.transaction() as conn:
-            row=conn.execute("SELECT password_hash FROM users WHERE username=?",(user,)).fetchone()
-            if not verify_password(payload.current_password,row["password_hash"]): raise HTTPException(400,"current password is incorrect")
             conn.execute("UPDATE users SET password_hash=? WHERE username=?",(hash_password(payload.new_password),user))
             conn.execute("DELETE FROM sessions WHERE username=?",(user,))
+            conn.execute('DELETE FROM auth_challenges WHERE username=?', (user,))
+            conn.execute('DELETE FROM security_confirmations WHERE username=?', (user,))
+        security_event(db, user, 'password_changed')
         response.delete_cookie("dt_session")
         return {"ok":True}
 
@@ -246,10 +298,11 @@ def create_app(config: Config | None = None) -> FastAPI:
         for row in rows:
             item=decode_video(row)
             item["watch_position"]=row["user_watch_position"]
-            items.append(item)
+            items.append(library.enrich_video(db, item, user))
         return {"items":items,"total":len(items)}
     @app.get("/api/videos/{video_id}")
-    def video(video_id: str, _: str=Depends(authenticated)): return decode_video(video_or_404(video_id))
+    def video(video_id: str, user: str=Depends(authenticated)):
+        return library.enrich_video(db, decode_video(video_or_404(video_id)), user)
     # Preserve the retired pin endpoint's absence even though the item route otherwise
     # makes a POST to this path look like a method error.
     @app.post("/api/videos/{video_id}/pin", include_in_schema=False)
@@ -258,35 +311,7 @@ def create_app(config: Config | None = None) -> FastAPI:
 
     def queue(video_id: str, immediate: bool = False):
         with db.transaction() as conn:
-            video=conn.execute("SELECT * FROM videos WHERE id=?",(video_id,)).fetchone()
-            if not video: raise HTTPException(404,"video not found")
-            job=conn.execute("SELECT * FROM jobs WHERE video_id=? AND state IN ('queued','downloading','preparing')",(video_id,)).fetchone()
-            # An existing preparing job remains authoritative even if early bytes
-            # have made the video look playable.
-            if job:
-                if immediate and job["state"] == "queued":
-                    conn.execute('UPDATE jobs SET interactive=1 WHERE id=?', (job['id'],))
-                    job=conn.execute("SELECT * FROM jobs WHERE id=?", (job["id"],)).fetchone()
-                return video, job
-            if video["state"] == "removing":
-                raise HTTPException(409,"cache removal is in progress")
-            if video["removed_from_source"] and not video["local_path"]:
-                raise HTTPException(409,"video was removed from its source")
-            if video["state"] in ("playable","cached") and video["playback_url"]:
-                return video, None
-            now=utcnow(); jid=db.new_id()
-            try:
-                conn.execute("INSERT INTO jobs(id,video_id,title,state,phase,interactive,updated_at) VALUES (?,?,?,?,?,?,?)",(jid,video_id,video["title"],"queued","queued",int(immediate),now))
-            except sqlite3.IntegrityError:
-                job=conn.execute("SELECT * FROM jobs WHERE video_id=? AND state IN ('queued','downloading','preparing')",(video_id,)).fetchone()
-                if not job: raise
-                if immediate and job["state"] == "queued":
-                    conn.execute("UPDATE jobs SET interactive=1 WHERE id=?", (job["id"],))
-                    job=conn.execute("SELECT * FROM jobs WHERE id=?", (job["id"],)).fetchone()
-                return video, job
-            conn.execute("UPDATE videos SET state='queued',updated_at=? WHERE id=?",(now,video_id))
-            job=conn.execute("SELECT * FROM jobs WHERE id=?",(jid,)).fetchone(); video=conn.execute("SELECT * FROM videos WHERE id=?",(video_id,)).fetchone()
-            return video,job
+            return enqueue_video(conn, video_id, immediate)
     @app.post("/api/videos/{video_id}/play")
     def play(video_id: str, user: str=Depends(authenticated)):
         video,job=queue(video_id, immediate=True)
@@ -302,6 +327,8 @@ def create_app(config: Config | None = None) -> FastAPI:
     @app.post("/api/videos/{video_id}/activity")
     def activity(video_id: str, payload: Activity, user: str=Depends(authenticated)):
         video_or_404(video_id)
+        if payload.active and payload.position is not None and payload.duration is not None:
+            library.observe_playback(db, user, video_id, payload.position, payload.duration)
         record_watch(db, user, video_id, payload.position, payload.duration)
         if payload.active:
             with db.transaction() as conn:
@@ -347,61 +374,19 @@ def create_app(config: Config | None = None) -> FastAPI:
             tracks.append(track)
             root = cfg.media_dir / video_id
             conn.execute("UPDATE videos SET asset_dir=COALESCE(asset_dir,?), subtitle_tracks=?, caption_status='ready',caption_error=NULL,updated_at=? WHERE id=?", (str(root), json.dumps(tracks), utcnow(), video_id))
-        return decode_video(video_or_404(video_id))
-    def _cache_paths(row) -> list[Path]:
-        candidates = [Path(value) for value in (row["local_path"], row["asset_dir"]) if value]
-        unique: list[Path] = []
-        for candidate in sorted(set(candidates), key=lambda path: len(path.parts)):
-            if not any(existing == candidate or existing in candidate.parents for existing in unique):
-                unique.append(candidate)
-        return unique
-
-    def _remove_paths(paths: list[Path]) -> int:
-        size = sum(
-            file.stat().st_size for path in paths
-            for file in (path.rglob("*") if path.is_dir() else (path,)) if file.is_file()
-        )
-        for path in paths:
-            if path.is_dir(): shutil.rmtree(path, ignore_errors=True)
-            else: path.unlink(missing_ok=True)
-        return size
-
-    def _reserve_cache_removal(video_id: str, *, automatic: bool = False):
-        with db.transaction() as conn:
-            row = conn.execute("SELECT * FROM videos WHERE id=?", (video_id,)).fetchone()
-            if not row: raise HTTPException(404, "video not found")
-            if row["active_until"] > time.time():
-                raise HTTPException(409, "active video cannot be removed")
-            active = conn.execute(
-                "SELECT 1 FROM jobs WHERE video_id=? AND state IN ('queued','downloading','preparing')", (video_id,)
-            ).fetchone()
-            if active: raise HTTPException(409, "ongoing job cannot be removed")
-            if row["state"] not in ("cached", "playable") and automatic:
-                return None
-            paths = _cache_paths(row)
-            # Reserve before touching disk so queue/worker paths cannot race the deletion.
-            conn.execute(
-                "UPDATE videos SET state='removing', local_path=NULL, asset_dir=NULL, playback_mode=NULL, "
-                "playback_url=NULL, playback_until=NULL, audio_tracks='[]', subtitle_tracks='[]', updated_at=? WHERE id=?",
-                (utcnow(), video_id),
-            )
-            return row, paths
-
-    def _finish_cache_removal(video_id: str, removed_from_source: bool) -> None:
-        with db.transaction() as conn:
-            conn.execute(
-                "UPDATE videos SET state=?, bytes_downloaded=0, error=CASE WHEN ? THEN 'Removed from Google Drive' ELSE NULL END, updated_at=? WHERE id=?",
-                ("removed" if removed_from_source else "cloud", int(removed_from_source), utcnow(), video_id),
-            )
-
+        library.index_caption(db, video_id, track['id'], normalized.decode('utf-8'))
+        return library.enrich_video(db, decode_video(video_or_404(video_id)), cfg.admin_user)
     @app.delete("/api/videos/{video_id}/cache")
     def delete_cache(video_id: str, _: str=Depends(authenticated)):
-        reserved = _reserve_cache_removal(video_id)
-        assert reserved is not None
-        row, paths = reserved
-        _remove_paths(paths)
-        _finish_cache_removal(video_id, bool(row["removed_from_source"]))
-        return {"ok":True}
+        video_or_404(video_id)
+        from .cache_safety import CacheConflict
+        try:
+            result = cache_manager.remove_reserved(cache_manager.reserve(video_id))
+        except CacheConflict as exc:
+            raise HTTPException(409, str(exc)) from None
+        except OSError:
+            raise HTTPException(409, 'Cached artifacts changed or could not be removed; refresh and review storage') from None
+        return {'ok': True, **result}
 
     @app.get("/api/jobs")
     def jobs(_: str=Depends(authenticated)):
@@ -438,7 +423,7 @@ def create_app(config: Config | None = None) -> FastAPI:
     @app.get("/api/sources")
     def sources(_: str=Depends(authenticated)):
         with db.connect() as conn: rows=conn.execute("SELECT * FROM sources WHERE deleted=0 ORDER BY name").fetchall()
-        return {"items":[decode_source(x) for x in rows]}
+        return {"items":[attach_health(db, decode_source(x)) for x in rows]}
     @app.post("/api/sources/google")
     def create_google(payload: GoogleRequest, _: str=Depends(authenticated)):
         selected_folder = folder_id(payload.folder)
@@ -480,8 +465,10 @@ def create_app(config: Config | None = None) -> FastAPI:
                 credential_path=Path(source["credential_path"]); creds=json.loads(credential_path.read_text())
                 GoogleAdapter(source["auth_mode"],creds,credential_path).test_metadata_access(source["folder_id"])
         except (OSError, ValueError, RuntimeError, httpx.HTTPError) as exc:
-            raise HTTPException(400, "source metadata access failed") from exc
-        return {"ok":True,"message":"metadata access succeeded"}
+            health = record_result(db, source_id, 'test', False, exc)
+            raise HTTPException(400, health['message']) from None
+        health = record_result(db, source_id, 'test', True)
+        return {"ok":True,"message":"metadata access succeeded", "health":health}
     @app.post("/api/sources/{source_id}/sync")
     def sync_source(source_id: str, _: str=Depends(authenticated)):
         source=get_source(source_id)
@@ -537,8 +524,10 @@ def create_app(config: Config | None = None) -> FastAPI:
                 conn.execute("UPDATE sources SET video_count=(SELECT count(*) FROM videos WHERE source_id=?),last_sync=?,status='ready',error=NULL,sync_progress=? WHERE id=?",(source_id,utcnow(),progress,source_id))
         except (OSError, ValueError, RuntimeError, httpx.HTTPError) as exc:
             with db.transaction() as conn: conn.execute("UPDATE sources SET status='error',error='metadata sync failed',sync_progress=? WHERE id=?", (json.dumps({"phase": "failed", "processed": 0, "total": None}), source_id))
-            raise HTTPException(400, "source metadata sync failed") from exc
-        return {"source":decode_source(get_source(source_id)),"added":added,"updated":updated}
+            health = record_result(db, source_id, 'sync', False, exc)
+            raise HTTPException(400, health['message']) from None
+        record_result(db, source_id, 'sync', True)
+        return {"source":attach_health(db, decode_source(get_source(source_id))),"added":added,"updated":updated}
     @app.post("/api/sources/{source_id}/oauth/start")
     def oauth_start(source_id: str, dt_session: str | None = Cookie(None), _: str=Depends(authenticated)):
         source=get_source(source_id)
@@ -552,7 +541,7 @@ def create_app(config: Config | None = None) -> FastAPI:
         params={"client_id":client.get("client_id", ""),"redirect_uri":redirect,"response_type":"code","scope":"https://www.googleapis.com/auth/drive.readonly","access_type":"offline","prompt":"consent","state":state}
         return {"url":"https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(params)}
     @app.get("/api/sources/google/callback")
-    def oauth_callback(state: str, code: str, dt_session: str | None = Cookie(None)):
+    def oauth_callback(request: Request, state: str, code: str, dt_session: str | None = Cookie(None), user: str=Depends(authenticated)):
         with db.transaction() as conn:
             row=conn.execute("SELECT value FROM settings WHERE key=?",(f"oauth:{state}",)).fetchone()
             conn.execute("DELETE FROM settings WHERE key=?",(f"oauth:{state}",))
@@ -572,11 +561,13 @@ def create_app(config: Config | None = None) -> FastAPI:
             tokens=response.json()
             if not tokens.get("access_token"): raise ValueError("missing access token")
         except (httpx.HTTPError, ValueError) as exc:
-            raise HTTPException(400,"OAuth token exchange failed") from exc
+            record_result(db, source['id'], 'oauth', False, exc)
+            raise HTTPException(400,"OAuth token exchange failed") from None
         # Keep client configuration and refresh material private, with no echo to API callers.
         client.update({key:tokens[key] for key in ("access_token","refresh_token","token_type") if key in tokens})
         client["expires_at"] = int(time.time()) + int(tokens.get("expires_in", 3600))
         write_credentials(source["id"],client)
+        record_result(db, source['id'], 'oauth', True)
         return RedirectResponse(url="/?view=sources&oauth=connected")
     @app.delete("/api/sources/{source_id}")
     def remove_source(source_id: str, _: str=Depends(authenticated)):
@@ -665,20 +656,7 @@ def create_app(config: Config | None = None) -> FastAPI:
         return settings_dict()
     @app.post("/api/cache/cleanup")
     def cleanup(_: str=Depends(authenticated)):
-        limit=int(settings_dict()["cache_limit_gb"]*1024**3); used=settings_dict()["cache_used_bytes"]; freed=removed=0
-        with db.connect() as conn: rows=conn.execute("SELECT * FROM videos WHERE pinned=0 AND active_until<? AND state IN ('cached','playable') ORDER BY COALESCE(last_played,updated_at)",(int(time.time()),)).fetchall()
-        for candidate in rows:
-            if used <= limit: break
-            try:
-                reserved = _reserve_cache_removal(candidate["id"], automatic=True)
-            except HTTPException:
-                continue
-            if not reserved: continue
-            row, paths = reserved
-            size = _remove_paths(paths)
-            _finish_cache_removal(row["id"], bool(row["removed_from_source"]))
-            used-=size; freed+=size; removed+=1
-        return {"removed":removed,"freed_bytes":freed}
+        raise HTTPException(409, 'Bulk cleanup now requires a storage preview and explicit confirmation')
 
     @app.api_route("/api/media/{video_id}/download", methods=["GET", "HEAD"])
     def device_download(video_id: str, request: Request, user: str=Depends(authenticated)):
@@ -706,7 +684,15 @@ def create_app(config: Config | None = None) -> FastAPI:
         return FileResponse(path,media_type=content_type(path),headers={"Cache-Control":"private, no-store"})
 
     from .addons import router as addons_router
+    from .security_routes import router as security_router
+    from .library_routes import router as library_router
+    from .notification_routes import router as notification_router
+    from .metadata_routes import router as metadata_router
     app.include_router(addons_router)
+    app.include_router(security_router)
+    app.include_router(library_router)
+    app.include_router(notification_router)
+    app.include_router(metadata_router)
 
     ui_dir = Path(os.environ.get("DT_UI_DIR", "")).expanduser() if os.environ.get("DT_UI_DIR") else None
     @app.get("/{frontend_path:path}", include_in_schema=False)
@@ -720,8 +706,14 @@ def create_app(config: Config | None = None) -> FastAPI:
             raise HTTPException(404, "UI is not installed")
         candidate = (ui_dir / frontend_path).resolve()
         if frontend_path and ui_dir.resolve() in candidate.parents and candidate.is_file():
+            if frontend_path == 'sw.js':
+                return FileResponse(candidate, media_type='application/javascript', headers={'Cache-Control': 'no-cache', 'Service-Worker-Allowed': '/'})
+            if frontend_path == 'manifest.webmanifest':
+                return FileResponse(candidate, media_type='application/manifest+json', headers={'Cache-Control': 'no-cache'})
             return FileResponse(candidate)
-        return FileResponse(index)
+        if frontend_path.startswith(('assets/', 'icons/')) or frontend_path in ('sw.js', 'manifest.webmanifest'):
+            raise HTTPException(404, 'static asset not found')
+        return FileResponse(index, headers={'Cache-Control': 'no-store'})
     return app
 
 app=create_app()

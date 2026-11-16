@@ -26,7 +26,11 @@ from .sources import GoogleAdapter, validate_url
 from .resources import media_threads, media_cpus, cpu_limit
 from .downloader_tools import download_external
 from .languages import preferred_audio, english_subtitle
-from .cache import automatic_cleanup
+from .cache_safety import automatic_cleanup
+from .notifications import emit_event, process_outbox
+from .diagnostics import record_probe, transition_stage, finish_job, record_sample
+from .caption_index import index_existing_captions
+from .storage_features import storage_maintenance
 from .transfer_policy import TransferThrottle, allowed_now, limit_bytes as configured_limit_bytes
 
 ACTIVE = ('queued', 'downloading', 'preparing')
@@ -43,6 +47,7 @@ class Control:
     def __init__(self, db: Database, job_id: str, data: Path):
         self.db, self.job_id, self.data = db, job_id, data
         self.last_budget = 0.0
+        self.last_phase = None
 
     def check(self):
         if STOP.is_set():
@@ -76,6 +81,9 @@ class Control:
             raise RuntimeError('Cache budget reached; clean up cached media or increase the budget')
 
     def progress(self, phase, done=0, total=None, state=None, unit='bytes'):
+        if phase != self.last_phase:
+            transition_stage(self.db, self.job_id, phase)
+            self.last_phase = phase
         known = total is not None and total > 0
         with self.db.transaction() as conn:
             conn.execute('UPDATE jobs SET phase=?,progress_known=?,progress_unit=?,progress=?,claimed_at=?,updated_at=? WHERE id=?',
@@ -652,6 +660,7 @@ def process_job(db, data_dir, job_id):
         _deduplicate_source(db, video['id'], source, digest)
         control.progress('probe', state='preparing')
         probe = ffprobe(source, control)
+        record_probe(db, video['id'], probe)
         if not any(s.get('codec_type') == 'video' for s in probe.get('streams', [])):
             raise RuntimeError('The downloaded source does not contain a video stream')
         _metadata(db, video['id'], probe)
@@ -690,19 +699,37 @@ def process_job(db, data_dir, job_id):
             pass  # Optional derivative failure does not revoke valid playback.
         with ENCODERS:
             _auto_captions(source, root, probe, video['id'], control)
+        index_existing_captions(db, data_dir / 'cache', video['id'])
         with db.transaction() as conn:
             conn.execute("UPDATE jobs SET state='completed',phase='complete',progress=100,progress_known=1,error=NULL,updated_at=? WHERE id=?", (utcnow(), job_id))
             conn.execute("UPDATE videos SET state='cached',error=NULL,updated_at=? WHERE id=?", (utcnow(), video['id']))
+            emit_event(conn, f'job:{job_id}:completed', 'job_completed', 'Media is ready', 'A requested media job completed.', entity_id=video['id'])
+        finish_job(db, job_id, 'completed')
     except Cancelled:
         with db.transaction() as conn:
             conn.execute("UPDATE jobs SET state='cancelled',error=NULL,updated_at=? WHERE id=?", (utcnow(), job_id))
             conn.execute("UPDATE videos SET state='cancelled',playback_mode=NULL,playback_url=NULL,updated_at=? WHERE id=?", (utcnow(), video['id']))
+            emit_event(conn, f'job:{job_id}:cancelled', 'job_cancelled', 'Media job cancelled', 'A requested media job was cancelled.', entity_id=video['id'])
+        finish_job(db, job_id, 'cancelled', {'error_code': 'cancelled'})
     except Exception as exc:
-        # Provider exceptions can include signed URLs. Only known local errors are public.
-        message = str(exc)[:1200] if isinstance(exc, RuntimeError) else 'Media processing failed; check source access and retry'
+        # Raw provider/FFmpeg errors can contain signed URLs, credentials and paths.
+        error_code = 'unknown'
+        message = 'Media processing failed; check source health, disk capacity and codec diagnostics, then retry'
+        if isinstance(exc, RuntimeError):
+            if 'headroom' in str(exc) or 'budget reached' in str(exc):
+                error_code = 'disk_full'
+                message = 'Storage budget reached; review inactive cached media or increase capacity'
+            elif 'does not contain a video stream' in str(exc):
+                error_code = 'invalid_media'
+                message = 'The downloaded source does not contain a video stream'
+            elif 'execution deadline' in str(exc):
+                error_code = 'timeout'
+                message = 'Media processing exceeded its execution deadline; inspect the failed stage before retrying'
         with db.transaction() as conn:
             conn.execute("UPDATE jobs SET state='failed',error=?,updated_at=? WHERE id=?", (message, utcnow(), job_id))
             conn.execute("UPDATE videos SET state='failed',error=?,playback_mode=NULL,playback_url=NULL,updated_at=? WHERE id=?", (message, utcnow(), video['id']))
+            emit_event(conn, f'job:{job_id}:failed', 'job_failed', 'Media job needs attention', message, entity_id=video['id'])
+        finish_job(db, job_id, 'failed', {'error_code': error_code})
 
 
 def claim(db):
@@ -747,6 +774,12 @@ def exclusive_worker(data_dir):
         handle.close()
 
 
+def _feature_tick(db, cfg):
+    """Runs outside the heartbeat thread; only explicitly enabled policies/channels act."""
+    storage_maintenance(db, cfg.data_dir)
+    return process_outbox(db, cfg)
+
+
 def main():
     global ENCODERS
     cfg = load_config()
@@ -754,13 +787,20 @@ def main():
     db.initialize()
     for name in ('SIGTERM', 'SIGINT'):
         signal.signal(getattr(signal, name), lambda *_: STOP.set())
-    with exclusive_worker(cfg.data_dir), concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+    with exclusive_worker(cfg.data_dir), concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool, concurrent.futures.ThreadPoolExecutor(max_workers=1) as features:
         with db.transaction() as conn:
             # Exclusive worker identity permits startup recovery, not time-based stealing
             # of a still-running job by a second worker process.
             conn.execute("UPDATE jobs SET state='queued',claimed_at=NULL WHERE state IN ('downloading','preparing')")
         futures = {}
+        feature_future, last_features = None, 0.0
         while not STOP.is_set():
+            if time.monotonic() - last_features >= 30 and (feature_future is None or feature_future.done()):
+                if feature_future is not None:
+                    with contextlib.suppress(Exception):
+                        feature_future.result()
+                feature_future = features.submit(_feature_tick, db, cfg)
+                last_features = time.monotonic()
             with db.transaction() as conn:
                 conn.execute("INSERT OR REPLACE INTO settings(key,value) VALUES ('worker_heartbeat',?)", (str(int(time.time())),))
                 conn.execute("INSERT OR REPLACE INTO settings(key,value) VALUES ('worker_cpu',?)", (json.dumps({'effective_cpus': media_cpus(), 'cgroup_cpus': cpu_limit()}),))

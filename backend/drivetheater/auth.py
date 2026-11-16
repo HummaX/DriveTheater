@@ -26,13 +26,15 @@ def ensure_admin(db: Database, username: str, password: str | None) -> None:
     with db.transaction() as conn:
         exists = conn.execute("SELECT 1 FROM users LIMIT 1").fetchone()
         if not exists and password:
-            conn.execute("INSERT INTO users VALUES (?,?,?)", (username, hash_password(password), time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())))
+            conn.execute("INSERT INTO users(username,password_hash,created_at) VALUES (?,?,?)", (username, hash_password(password), time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())))
 
 
-def make_session(db: Database, username: str) -> str:
+def make_session(db: Database, username: str, *, device: str = 'Browser', network_hash: str = '', mfa_verified: bool = False) -> str:
     token = secrets.token_urlsafe(32)
+    now = int(time.time())
     with db.transaction() as conn:
-        conn.execute("INSERT INTO sessions VALUES (?,?,?)", (session_hash(token), username, int(time.time()) + 7 * 86400))
+        conn.execute("INSERT INTO sessions(token_hash,username,expires_at,id,created_at,last_seen_at,device_label,network_hash,mfa_verified) VALUES (?,?,?,?,?,?,?,?,?)",
+                     (session_hash(token), username, now + 7 * 86400, secrets.token_hex(16), now, now, device[:80], network_hash, int(mfa_verified)))
     return token
 
 

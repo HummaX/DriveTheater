@@ -4,7 +4,7 @@
 
 Independent project: [HummaX/DriveTheater](https://github.com/HummaX/DriveTheater). This is **not an upgrade of DriveConnector** and does not reuse its credentials or storage.
 
-**Release status:** preview build. Local tests and synthetic browser checks pass; a real Ubuntu 24.04/Docker installation and live external providers remain unverified. `PIN_PENDING` below must be replaced with a published, reviewed commit before running the installer.
+**Release status:** published preview. Local tests and synthetic browser checks pass; a real Ubuntu 24.04/Docker installation and live external providers remain unverified. The bootstrap below pins the published source revision [`42d2f9f`](https://github.com/HummaX/DriveTheater/commit/42d2f9f9e1fcc7397957ce7d9482f0ce3e191742), not a mutable branch.
 
 ```mermaid
 flowchart LR
@@ -52,10 +52,10 @@ There are no profiles or content pins. Only use media you are authorized to acce
 
 The installer uses the existing root disk, with source in `/opt/drivetheater`, data in `/var/lib/drivetheater`, and private configuration in `/etc/drivetheater/install.env`. No manual dotenv editing, extra disk mount or formatting is required. It generates new admin credentials and secrets for each fresh server.
 
-**Do not run this placeholder command until a reviewed commit is published:**
+**Pinned preview bootstrap for a fresh Ubuntu 24.04 host.** Review the script and remaining release boundaries first; running it installs the runtime dependencies. It has not been production-tested on a real host here.
 
 ```bash
-curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/HummaX/DriveTheater/PIN_PENDING/scripts/install.sh | sudo bash -s -- --version PIN_PENDING
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/HummaX/DriveTheater/42d2f9f9e1fcc7397957ce7d9482f0ce3e191742/scripts/install.sh | sudo bash -s -- --version 42d2f9f9e1fcc7397957ce7d9482f0ce3e191742
 ```
 
 The default worker CPU quota is approximately 90% of detected CPU (about **14.4 vCPUs on a 16-vCore host**). It bounds the worker, not the whole host, and does not guarantee 10% of host CPU always remains idle. Start with one preparation job. Hardware acceleration is intentionally excluded.

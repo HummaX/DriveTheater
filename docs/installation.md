@@ -71,7 +71,7 @@ The normal setup does not reuse DriveConnector credentials or storage. It does n
 
 ### Choose the preview revision
 
-These commands pin both the installer download and the application to corrected preview commit [`027ea15`](https://github.com/HummaX/DriveTheater/commit/027ea152a3e4ed2fdc6200b490a34d7520099bee). The full revision is `027ea152a3e4ed2fdc6200b490a34d7520099bee`; it includes the Ubuntu release-name fix. Later changes to the `claude-code` branch cannot silently change this installation. To use another reviewed revision, replace the commit in both the installer URL and the `--version` argument.
+These commands pin both the installer download and the application to published preview commit [`1dcbddb`](https://github.com/HummaX/DriveTheater/commit/1dcbddbaee34bedbd13cc2c75c590679af839e7d). The full revision is `1dcbddbaee34bedbd13cc2c75c590679af839e7d`; it includes the Ubuntu release-name correction, the container application-permission repair, and the expanded preview features. Later changes to the `claude-code` branch cannot silently change this installation. To use another reviewed revision, replace the commit in both the installer URL and the `--version` argument.
 
 **Do not use the older `42d2f9f9e1fcc7397957ce7d9482f0ce3e191742` bootstrap for a new attempt.** That immutable script contains the Ubuntu release-name bug. Updating a branch does not change an old commit URL; use the corrected commit pinned in this guide.
 
@@ -80,7 +80,7 @@ These commands pin both the installer download and the application to corrected 
 Run this **on the server**. It uses port **8080** to avoid taking over port 80 from another website:
 
 ```bash
-curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/HummaX/DriveTheater/027ea152a3e4ed2fdc6200b490a34d7520099bee/scripts/install.sh | sudo bash -s -- --version 027ea152a3e4ed2fdc6200b490a34d7520099bee --port 8080
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/HummaX/DriveTheater/1dcbddbaee34bedbd13cc2c75c590679af839e7d/scripts/install.sh | sudo bash -s -- --version 1dcbddbaee34bedbd13cc2c75c590679af839e7d --port 8080
 ```
 
 This downloads a script and executes it with administrator privileges. Only run it after reviewing the source and trusting the selected revision. Use the download-first option below if you prefer to inspect the exact file before running it.
@@ -110,10 +110,10 @@ INSTALL_TMP="$(mktemp -d)"
 Download the installer:
 
 ```bash
-curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/HummaX/DriveTheater/027ea152a3e4ed2fdc6200b490a34d7520099bee/scripts/install.sh -o "$INSTALL_TMP/install.sh"
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/HummaX/DriveTheater/1dcbddbaee34bedbd13cc2c75c590679af839e7d/scripts/install.sh -o "$INSTALL_TMP/install.sh"
 ```
 
-Read it in the terminal, or review [the installer source on GitHub](https://github.com/HummaX/DriveTheater/blob/027ea152a3e4ed2fdc6200b490a34d7520099bee/scripts/install.sh) in your browser:
+Read it in the terminal, or review [the installer source on GitHub](https://github.com/HummaX/DriveTheater/blob/1dcbddbaee34bedbd13cc2c75c590679af839e7d/scripts/install.sh) in your browser:
 
 ```bash
 less "$INSTALL_TMP/install.sh"
@@ -122,7 +122,7 @@ less "$INSTALL_TMP/install.sh"
 Press `q` to leave `less`. If that viewer is not installed, use the GitHub source link; do not install a new tool just to read this file. When you are ready:
 
 ```bash
-sudo bash "$INSTALL_TMP/install.sh" --version 027ea152a3e4ed2fdc6200b490a34d7520099bee --port 8080
+sudo bash "$INSTALL_TMP/install.sh" --version 1dcbddbaee34bedbd13cc2c75c590679af839e7d --port 8080
 ```
 
 ### Know when setup has succeeded

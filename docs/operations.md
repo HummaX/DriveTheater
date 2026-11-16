@@ -195,14 +195,14 @@ Restrict the uploaded setup file:
 chmod 600 "$HOME/drivetheater-private-setup.json"
 ```
 
-Review the selected installer revision. The following pins the installer and app to corrected preview commit [`027ea15`](https://github.com/HummaX/DriveTheater/commit/027ea152a3e4ed2fdc6200b490a34d7520099bee), not a moving branch.
+Review the selected installer revision. The following pins the installer and app to published preview commit [`1dcbddb`](https://github.com/HummaX/DriveTheater/commit/1dcbddbaee34bedbd13cc2c75c590679af839e7d), including the Ubuntu release-name correction, container permission repair, and expanded preview features. It is not a moving branch.
 
 **If your bundle contains Google OAuth connections, do not run the command unchanged.** Configure the new DNS/HTTPS proxy first and add `--public-url https://YOUR_ACTUAL_DOMAIN` to this fresh-install command, even when reusing the old domain. Import builds the stored OAuth callback from that option; omitting it leaves the callback unavailable. Changing the flag on a later installer rerun does not rewrite the existing configuration. Use your actual HTTPS website to sign in, rather than the default plain-HTTP tunnel address.
 
 For connections that do not need a public OAuth callback:
 
 ```bash
-curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/HummaX/DriveTheater/027ea152a3e4ed2fdc6200b490a34d7520099bee/scripts/install.sh | sudo bash -s -- --version 027ea152a3e4ed2fdc6200b490a34d7520099bee --port 8080 --setup-bundle "$HOME/drivetheater-private-setup.json"
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/HummaX/DriveTheater/1dcbddbaee34bedbd13cc2c75c590679af839e7d/scripts/install.sh | sudo bash -s -- --version 1dcbddbaee34bedbd13cc2c75c590679af839e7d --port 8080 --setup-bundle "$HOME/drivetheater-private-setup.json"
 ```
 
 Use an absolute bundle path; `$HOME` expands to one before `sudo` runs. Import is for a **fresh installation only**. It is intentionally refused if the new server already has a configured DriveTheater installation. Do not delete an existing configuration to force an import. The installer does not configure HTTPS itself; some providers may require authorization again after migration.

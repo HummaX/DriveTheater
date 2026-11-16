@@ -18,7 +18,7 @@ A build-time check runs after `USER 10001:10001`: it imports the package and rea
 
 ## Before retrying
 
-**Publication is required first.** A local Dockerfile edit is not available from GitHub. Use the full published commit containing the permission fix. The older `027ea152a3e4ed2fdc6200b490a34d7520099bee` revision fixes the Ubuntu release-name bug, but does **not** contain this image-permission fix.
+**Use the full published permission-fix revision:** `1dcbddbaee34bedbd13cc2c75c590679af839e7d`. The older `027ea152a3e4ed2fdc6200b490a34d7520099bee` revision fixes the Ubuntu release-name bug, but does **not** contain this image-permission fix.
 
 Do not:
 
@@ -63,10 +63,10 @@ Keep the printed backup directory. Backups include private configuration and any
 
 ### 4. Update to the published permission-fix revision
 
-**Template only:** replace `PUBLISHED_PERMISSION_FIX_COMMIT` with the actual full Git commit supplied after the fix is published. Do not run it with the placeholder, the old `027ea15` revision, or an unspecified default branch.
+Update to the published full revision `1dcbddbaee34bedbd13cc2c75c590679af839e7d`. Do not use the older `027ea15` revision or an unspecified default branch.
 
 ```bash
-sudo bash /opt/drivetheater/scripts/manage.sh update PUBLISHED_PERMISSION_FIX_COMMIT
+sudo bash /opt/drivetheater/scripts/manage.sh update 1dcbddbaee34bedbd13cc2c75c590679af839e7d
 ```
 
 The updater preserves configuration and credentials, creates its own backup, builds the replacement image, recreates the app containers, and checks readiness. Building can take several minutes. It may briefly start the old image while building; the same old restart error during that interval does not establish whether the replacement failed. Read the command's final result.

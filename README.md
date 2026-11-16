@@ -39,10 +39,10 @@ For example, if the provider supplied a root login, use `root` in place of `YOUR
 
 For the beginner setup, keep **port 8080 closed to public inbound traffic in your provider's firewall**. You will open the website through SSH in the next step. Keep SSH access allowed.
 
-The command below installs corrected preview revision [`027ea15`](https://github.com/HummaX/DriveTheater/commit/027ea152a3e4ed2fdc6200b490a34d7520099bee), using port **8080**. Both the installer download and the application revision are pinned to that same commit, which includes the Ubuntu release-name fix. Read [the full guide](docs/installation.md#install-drivetheater) for a download-and-review option.
+The command below installs published preview revision [`1dcbddb`](https://github.com/HummaX/DriveTheater/commit/1dcbddbaee34bedbd13cc2c75c590679af839e7d), using port **8080**. Both the installer download and the application revision are pinned to that same immutable commit. It includes the Ubuntu release-name correction, container application-permission repair, and expanded preview features. Read [the full guide](docs/installation.md#install-drivetheater) for a download-and-review option.
 
 ```bash
-curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/HummaX/DriveTheater/027ea152a3e4ed2fdc6200b490a34d7520099bee/scripts/install.sh | sudo bash -s -- --version 027ea152a3e4ed2fdc6200b490a34d7520099bee --port 8080
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/HummaX/DriveTheater/1dcbddbaee34bedbd13cc2c75c590679af839e7d/scripts/install.sh | sudo bash -s -- --version 1dcbddbaee34bedbd13cc2c75c590679af839e7d --port 8080
 ```
 
 This command installs missing packages, starts Docker, downloads the code, builds the app, and creates a new private login. Let it finish; downloading and building can take several minutes. Success ends with **`DriveTheater is ready`** and your initial login details.

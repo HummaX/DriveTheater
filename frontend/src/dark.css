@@ -90,8 +90,8 @@ input[type="checkbox"], input[type="radio"], input[type="range"] { accent-color:
 .controls .icon-button:hover { background: #314c68; }
 .volume, .compact-select, .caption-status { color: #d5e4f6; }
 .compact-select select { background: #243b56; color: #f2f6ff; border-color: #68819c; }
-.buffered-strip { background: #35465d; }
-.buffered-strip i { background: #abc3e0; }
+.buffered-strip { background: rgba(255, 255, 255, 0.2); }
+.buffered-strip i { background: #38bdf8; }
 .scrub-wrap input, .volume input { accent-color: #9ee0ef; }
 .subtitle-tools { background: #22344d; }
 .subtitle-tools .button { background: #1b3049; border-color: #68819c; color: var(--ink); }

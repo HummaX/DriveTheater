@@ -163,8 +163,12 @@ def original_download(db, row: dict, request: Request) -> Response:
         filename += extension
     etag = '"' + (row.get('content_sha256') or f'{stat.st_mtime_ns:x}-{total:x}') + '"'
     modified = formatdate(stat.st_mtime, usegmt=True)
-    headers = {'Accept-Ranges': 'bytes', 'Content-Type': 'application/octet-stream',
-               'Content-Disposition': "attachment; filename*=UTF-8''" + quote(filename, safe=''),
+    safe_ascii = re.sub(r'[^a-zA-Z0-9._-]', '_', filename) or 'video.mp4'
+    media_mime = str(row.get('mime_type') or '').split(';')[0].strip()
+    if not media_mime or media_mime == 'application/octet-stream':
+        media_mime = '.mkv' in filename.lower() and 'video/x-matroska' or 'video/mp4'
+    headers = {'Accept-Ranges': 'bytes', 'Content-Type': media_mime,
+               'Content-Disposition': f'attachment; filename="{safe_ascii}"; filename*=UTF-8\'\'{quote(filename, safe="")}',
                'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff',
                'ETag': etag, 'Last-Modified': modified}
     if request.method == 'HEAD':

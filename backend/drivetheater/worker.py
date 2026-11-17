@@ -439,13 +439,13 @@ def _make_card_assets(source, asset_dir, probe, control=None):
     temporary.mkdir(exist_ok=True)
     try:
         scale = 'scale=160:90:force_original_aspect_ratio=decrease,pad=160:90:(ow-iw)/2:(oh-ih)/2'
-        run(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-y', '-i', str(source), '-vf', f'fps=1/{interval:.6f},{scale},tile={columns}x{rows}:nb_frames={count}:padding=0', '-frames:v', '1', str(temporary / 'sprites.jpg')], 300, control)
+        run(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-y', '-threads', str(media_threads()), '-i', str(source), '-vf', f'fps=1/{interval:.6f},{scale},tile={columns}x{rows}:nb_frames={count}:padding=0', '-frames:v', '1', str(temporary / 'sprites.jpg')], 600, control)
         if control:
             control.progress('previews', 1, 3, unit='items')
         run(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-y', '-ss', str(min(duration * .1, max(0, duration - 6))), '-i', str(source), '-t', str(min(6, duration)), '-an', '-vf', 'scale=480:-2', '-c:v', 'libx264', '-threads', str(media_threads()), '-preset', 'veryfast', '-movflags', '+faststart', str(temporary / 'preview.mp4')], 300, control)
         if control:
             control.progress('previews', 2, 3, unit='items')
-        run(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-y', '-i', str(source), '-vf', 'scale=640:-2', '-frames:v', '1', str(temporary / 'poster.jpg')], 120, control)
+        run(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-y', '-threads', str(media_threads()), '-i', str(source), '-vf', 'scale=640:-2', '-frames:v', '1', str(temporary / 'poster.jpg')], 120, control)
         if control:
             control.progress('previews', 3, 3, unit='items')
         lines = ['WEBVTT', '']

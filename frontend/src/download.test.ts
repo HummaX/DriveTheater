@@ -15,7 +15,7 @@ describe('original-file downloads', () => {
   it('uses a direct browser attachment link, not a full-file JavaScript blob', () => {
     const html = renderToStaticMarkup(createElement(DeviceDownload, { video: { ...video, download_url: '/api/media/fixture/download' } }));
     expect(html).toContain('href="/api/media/fixture/download"');
-    expect(html).toContain('download=""');
+    expect(html).toContain('download="Original movie.mp4"');
     expect(html).toContain('Download to device');
   });
   it('keeps audio/caption controls but never renders a video-quality selector', () => {

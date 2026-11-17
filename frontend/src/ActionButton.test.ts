@@ -66,7 +66,7 @@ describe('button metadata', () => {
   });
 
   it('provides sign-in help without including password inputs in metadata', () => {
-    const html = renderToStaticMarkup(createElement(Login, { onLogin: vi.fn() }));
+    const html = renderToStaticMarkup(createElement(Login, { onLogin: vi.fn(), onMfa: vi.fn() }));
     expect(html).toContain('data-action="sign-in"');
     expect(html).toContain('aria-description="Sign in to this installation.');
   });

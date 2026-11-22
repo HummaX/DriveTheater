@@ -122,6 +122,7 @@ def run(command, timeout=120, control=None, tick=None, on_output=None):
         with output_path.open('wb') as output, error_path.open('wb') as errors:
             process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=output, stderr=errors,
                                        start_new_session=os.name == 'posix',
+                                       close_fds=True,
                                        pass_fds=(WORKER_LOCK_FD,) if os.name == 'posix' and WORKER_LOCK_FD is not None else (),
                                        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0)
             started = time.monotonic()
@@ -298,6 +299,8 @@ def _download_http(url, target, job_id, db, base_headers=None, control=None, vid
                 os.chmod(sidecar, 0o600)
                 received, last_probe = 0, 0
                 throttle = TransferThrottle(control.limit_bytes())
+                last_db_sync = time.monotonic()
+                last_progress_pct = -1.0
                 with partial.open('ab' if offset else 'wb') as handle:
                     for chunk in response.iter_raw(256 * 1024):
                         control.budget()
@@ -307,15 +310,24 @@ def _download_http(url, target, job_id, db, base_headers=None, control=None, vid
                         done = offset + received
                         if (total and done > total) or (max_bytes and done > max_bytes):
                             raise RuntimeError('Source exceeded the permitted content size')
-                        control.progress('download', done, total)
-                        with db.transaction() as conn:
-                            conn.execute('UPDATE videos SET bytes_downloaded=?,size_bytes=?,updated_at=? WHERE id=(SELECT video_id FROM jobs WHERE id=?)', (done, total, utcnow(), job_id))
+                        now = time.monotonic()
+                        current_pct = (done / total * 100) if total else 0.0
+                        should_sync = (now - last_db_sync >= 1.5) or (current_pct - last_progress_pct >= 1.0) or (total and done >= total)
+                        if should_sync:
+                            control.progress('download', done, total)
+                            with db.transaction() as conn:
+                                conn.execute('UPDATE videos SET bytes_downloaded=?,size_bytes=?,updated_at=? WHERE id=(SELECT video_id FROM jobs WHERE id=?)', (done, total, utcnow(), job_id))
+                            last_db_sync = now
+                            last_progress_pct = current_pct
                         # Pace after accounting for exactly the received bytes.  The
                         # throttle checks cancellation every 50ms while sleeping.
                         throttle.consume(len(chunk), control.check)
                         if video_id and done - last_probe > 2 * 1024 * 1024:
                             _early_playback(partial, total, control, video_id)
                             last_probe = done
+                control.progress('download', done, total)
+                with db.transaction() as conn:
+                    conn.execute('UPDATE videos SET bytes_downloaded=?,size_bytes=?,updated_at=? WHERE id=(SELECT video_id FROM jobs WHERE id=?)', (done, total, utcnow(), job_id))
                 if expected is not None and received != expected:
                     raise RuntimeError('Source ended before its declared content length; retry resumes verified bytes')
                 if total is not None and partial.stat().st_size != total:
@@ -625,6 +637,8 @@ def process_job(db, data_dir, job_id):
     root = data_dir / 'cache' / video['id']
     root.mkdir(parents=True, exist_ok=True)
     source = root / 'source.bin'
+    with db.transaction() as conn:
+        conn.execute('UPDATE videos SET asset_dir=?,updated_at=? WHERE id=?', (str(root), utcnow(), video['id']))
     try:
         automatic_cleanup(db, data_dir, exclude_video_id=video['id'])
         control.budget()

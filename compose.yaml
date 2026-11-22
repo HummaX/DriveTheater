@@ -4,6 +4,8 @@ x-runtime: &runtime
   init: true
   restart: unless-stopped
   user: "${DT_UID:-10001}:${DT_GID:-10001}"
+  mem_limit: "${DT_MEM_LIMIT:-2048m}"
+  mem_reservation: "${DT_MEM_RESERVATION:-512m}"
   volumes:
     - "${DT_HOST_DATA_DIR:?Run the installer to create configuration}:/data"
   environment: &environment

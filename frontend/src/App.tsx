@@ -321,6 +321,16 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const onPopState = () => {
+      const current = (new URLSearchParams(window.location.search).get('view') as View) || 'library';
+      setView(current);
+      setPlayer(null);
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  useEffect(() => {
     if (!username) {
       setEventsState('connecting');
       return;
@@ -351,5 +361,5 @@ export default function App() {
   if (checking) return <main className="loading-screen">Opening DriveTheater…</main>;
   if (!username) return <Login onLogin={login} onMfa={mfaLogin} />;
   const content = player ? <Player key={player.id} video={player} onClose={() => setPlayer(null)} onNext={setPlayer} /> : view === 'library' ? <LibraryPage onPlayer={setPlayer} refreshKey={refreshKey} /> : view === 'discover' ? <Discover onPlayer={setPlayer} /> : view === 'sources' ? <SourcesPage refreshKey={refreshKey} /> : view === 'downloads' ? <DownloadsPage refreshKey={refreshKey} /> : view === 'notifications' ? <Notifications refreshKey={refreshKey} /> : view === 'server' ? <ServerPage refreshKey={refreshKey} /> : <SettingsPage refreshKey={refreshKey} />;
-  return <div className="app-shell"><aside className="sidebar"><div className="wordmark"><Film size={21} />DriveTheater</div><nav>{nav.map(({ id, label, icon: Icon }) => <ActionButton key={id} className={view === id && !player ? 'nav-current' : ''} aria-current={view === id && !player ? 'page' : undefined} action={`nav-${id}`} onClick={() => { setPlayer(null); setView(id); history.replaceState(null, '', `?view=${id}`); }}><Icon size={18} />{label}</ActionButton>)}</nav><div className="side-footer"><span>{username}</span><ActionButton onClick={() => void api.logout().finally(() => { clearPwaShellCache(); setPlayer(null); setUsername(null); })}><LogOut size={17} />Sign out</ActionButton></div></aside><main className="main-panel"><div className="workspace-bar"><span className="workspace-connection"><i className={`status-dot ${eventsState === 'connected' ? 'status-online' : ''}`} />{eventsState === 'connected' ? 'Live server connection' : 'Reconnecting · polling active'}</span><span className="workspace-policy">Original video. No quality conversion.</span></div>{content}</main></div>;
+  return <div className="app-shell"><aside className="sidebar"><div className="wordmark"><Film size={21} />DriveTheater</div><nav>{nav.map(({ id, label, icon: Icon }) => <ActionButton key={id} className={view === id && !player ? 'nav-current' : ''} aria-current={view === id && !player ? 'page' : undefined} action={`nav-${id}`} onClick={() => { setPlayer(null); setView(id); history.pushState(null, '', `?view=${id}`); }}><Icon size={18} />{label}</ActionButton>)}</nav><div className="side-footer"><span>{username}</span><ActionButton onClick={() => void api.logout().finally(() => { clearPwaShellCache(); setPlayer(null); setUsername(null); })}><LogOut size={17} />Sign out</ActionButton></div></aside><main className="main-panel"><div className="workspace-bar"><span className="workspace-connection"><i className={`status-dot ${eventsState === 'connected' ? 'status-online' : ''}`} />{eventsState === 'connected' ? 'Live server connection' : 'Reconnecting · polling active'}</span><span className="workspace-policy">Original video. No quality conversion.</span></div>{content}</main></div>;
 }

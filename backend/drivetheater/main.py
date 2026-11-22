@@ -127,6 +127,7 @@ def create_app(config: Config | None = None) -> FastAPI:
         if request.url.path.startswith('/api/'):
             response.headers['Cache-Control'] = 'private, no-store'
             response.headers['X-Content-Type-Options'] = 'nosniff'
+            response.headers['X-Frame-Options'] = 'DENY'
         return response
 
     def _login_key(request: Request, username: str) -> tuple[str, str]:

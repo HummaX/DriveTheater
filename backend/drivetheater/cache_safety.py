@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import stat
 import time
 from pathlib import Path
@@ -302,26 +303,51 @@ class CacheManager:
                 conn.execute(f'DELETE FROM {table} WHERE video_id=?', (video_id,))
 
 
+def purge_orphaned_directories(data_dir: Path, active_ids: set[str]) -> int:
+    """Purge orphaned cache directories whose video IDs are not active in the database."""
+    cache_dir = data_dir / 'cache'
+    if not cache_dir.is_dir():
+        return 0
+    reclaimed = 0
+    try:
+        for entry in cache_dir.iterdir():
+            if entry.is_dir() and entry.name not in active_ids:
+                try:
+                    for item in entry.rglob('*'):
+                        if item.is_file():
+                            reclaimed += item.stat().st_size
+                    shutil.rmtree(entry, ignore_errors=True)
+                except OSError:
+                    continue
+    except OSError:
+        pass
+    return reclaimed
+
+
 def automatic_cleanup(db, data_dir: Path, needed_bytes: int = 0, exclude_video_id: str | None = None) -> int:
     """Legacy capacity cleanup through the same reservations as manual cleanup."""
     manager = CacheManager(db, data_dir)
     with db.connect() as conn:
         settings = {row['key']: row['value'] for row in conn.execute("SELECT key,value FROM settings WHERE key IN ('auto_cache_cleanup','cache_limit_gb','cache_cleanup_target_percent')")}
         candidates = list(conn.execute("SELECT * FROM videos WHERE id!=? AND state IN ('cached','playable','cancelled','failed') ORDER BY COALESCE(watch_position,0)>0 DESC,last_played IS NOT NULL,last_played,updated_at", (exclude_video_id or '',)))
+        active_ids = {row['id'] for row in conn.execute("SELECT id FROM videos WHERE state IN ('queued','downloading','preparing','playable','cached')")}
+    if exclude_video_id:
+        active_ids.add(exclude_video_id)
+    freed = purge_orphaned_directories(data_dir, active_ids)
     if not _enabled(settings.get('auto_cache_cleanup')):
-        return 0
+        return freed
     try:
         limit = int(float(settings.get('cache_limit_gb', '0')) * 1024 ** 3)
         target = min(100, max(1, int(float(settings.get('cache_cleanup_target_percent', '90')))))
         files = safe_walk(manager.root, manager.root)
     except (OSError, ValueError, OverflowError):
-        return 0
+        return freed
     unique = {inode_key(item): item for item in files}
     # Preserve the configured content-size budget, deduplicated by inode.
     # The return value still reports physical blocks actually unlinked.
     content = sum(item['size'] for item in unique.values())
     required = max(0, content + max(0, int(needed_bytes)) - limit * target // 100) if limit > 0 else 0
-    freed, content_freed = 0, 0
+    content_freed = 0
     for row in candidates:
         if content_freed >= required:
             break

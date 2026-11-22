@@ -97,7 +97,7 @@ export function MetadataTools({ videoId, initialType = 'movie', onChanged, onRel
       <p>{shown.genre?.join(', ')}{shown.director?.length ? ` · Directed by ${shown.director.join(', ')}` : ''}{shown.runtime ? ` · ${shown.runtime} min` : ''}{shown.rating !== undefined ? ` · Rating ${shown.rating}/10` : ''}</p>
       {shown.cast?.length ? <p>Cast: {shown.cast.join(', ')}</p> : null}
       {shown.imdb_id && <p>IMDb: {shown.imdb_id}</p>}
-      {shown.trailer_links?.length ? <p>Trailers: {shown.trailer_links.map((link, index) => <a key={link} href={link} target="_blank" rel="noreferrer">Trailer {index + 1}</a>)}</p> : null}
+      {shown.trailer_links?.length ? <p>Trailers: {shown.trailer_links.filter((link) => /^https?:\/\//i.test(link.trim())).map((link, index) => <a key={link} href={link.trim()} target="_blank" rel="noreferrer noopener">Trailer {index + 1}</a>)}</p> : null}
     </article>}
     {episodes.length > 0 && <section aria-label="Known episodes"><h3>Known episodes</h3><ul>{episodes.map(episode => <li key={`${episode.season}-${episode.episode}`}>S{episode.season.toString().padStart(2, '0')}E{episode.episode.toString().padStart(2, '0')} {episode.title} — {episode.status}{episode.released ? ` (${episode.released})` : ''}</li>)}</ul></section>}
     {related.length > 0 && <section aria-label="Related local titles"><h3>Related local titles</h3><ul>{related.map(item => <li key={item.video_id}><ActionButton className="button button-small" type="button" onClick={() => onRelated?.(item.video_id)}>{item.title || item.video_id}</ActionButton> {item.year || ''} {item.shared.length ? `(${item.shared.join(', ')})` : ''}</li>)}</ul></section>}

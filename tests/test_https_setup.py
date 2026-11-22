@@ -102,6 +102,10 @@ class RenderTests(unittest.TestCase):
         self.assertIn("reverse_proxy 127.0.0.1:8080", config)
         self.assertIn("flush_interval -1", config)
         self.assertIn('Cache-Control "no-store, private"', config)
+        self.assertIn('@static path /assets/* /favicon.svg /robots.txt', config)
+        self.assertIn('header @static Cache-Control "public, max-age=31536000, immutable"', config)
+        self.assertIn('@sw path /sw.js', config)
+        self.assertIn('header @sw Cache-Control "no-cache"', config)
         self.assertIn("Range requests", config)
         self.assertNotIn("trusted_proxies", config)
 

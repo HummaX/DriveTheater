@@ -164,13 +164,27 @@ http://{hostname} {{
 }}
 
 https://{hostname} {{
-\t# Private authenticated media responses must never be cached by clients or proxies.
+\t# Standard security headers applied to all responses.
 \theader {{
+\t\tX-Content-Type-Options \"nosniff\"
+\t\tX-Frame-Options \"DENY\"
+\t\tReferrer-Policy \"same-origin\"
+\t\tStrict-Transport-Security \"max-age=31536000; includeSubDomains\"
+\t\t-Server
+\t}}
+
+\t# Cache-Control partitioning: long-term immutable caching for hashed UI bundles,
+\t# revalidation for Service Worker, and no-store for dynamic media/api endpoints.
+\t@static path /assets/* /favicon.svg /robots.txt
+\theader @static Cache-Control \"public, max-age=31536000, immutable\"
+
+\t@sw path /sw.js
+\theader @sw Cache-Control \"no-cache\"
+
+\t@dynamic not path /assets/* /favicon.svg /robots.txt /sw.js
+\theader @dynamic {{
 \t\tCache-Control \"no-store, private\"
 \t\tPragma \"no-cache\"
-\t\tX-Content-Type-Options \"nosniff\"
-\t\tReferrer-Policy \"same-origin\"
-\t\t-Server
 \t}}
 
 \t# Caddy forwards Range requests by default. Immediate flushing preserves SSE streaming.
